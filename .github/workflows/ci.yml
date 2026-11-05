@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Testes (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  distros:
+    name: Instalação — ${{ matrix.name }}
+    runs-on: ${{ matrix.runner || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ubuntu-18.04, image: "ubuntu:18.04" }
+          - { name: ubuntu-20.04, image: "ubuntu:20.04" }
+          - { name: ubuntu-22.04, image: "ubuntu:22.04" }
+          - { name: ubuntu-24.04, image: "ubuntu:24.04" }
+          - name: debian-10
+            image: "debian:10"
+            prep: "printf 'deb http://archive.debian.org/debian buster main\\n' > /etc/apt/sources.list"
+          - { name: debian-11, image: "debian:11" }
+          - { name: debian-12, image: "debian:12" }
+          - name: centos-7
+            image: "centos:7"
+            prep: "sed -i -e 's|^mirrorlist=|#mirrorlist=|' -e 's|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|' /etc/yum.repos.d/CentOS-*.repo"
+          - { name: rocky-8, image: "rockylinux:8" }
+          - { name: rocky-9, image: "rockylinux:9" }
+          - { name: almalinux-9, image: "almalinux:9" }
+          - { name: oraclelinux-8, image: "oraclelinux:8" }
+          - { name: oraclelinux-9, image: "oraclelinux:9" }
+          - { name: fedora, image: "fedora:latest" }
+          - { name: amazonlinux-2, image: "amazonlinux:2" }
+          - { name: amazonlinux-2023, image: "amazonlinux:2023" }
+          - { name: opensuse-leap-15, image: "opensuse/leap:15" }
+          - { name: archlinux, image: "archlinux:latest" }
+          - { name: alpine, image: "alpine:3.20" }
+          - { name: debian-12 (python do sistema), image: "debian:12", args: "--system-python" }
+          - { name: ubuntu-24.04 ARM64, image: "ubuntu:24.04", runner: ubuntu-24.04-arm }
+          - { name: rocky-9 ARM64, image: "rockylinux:9", runner: ubuntu-24.04-arm }
+          - { name: amazonlinux-2023 ARM64, image: "amazonlinux:2023", runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar e testar em ${{ matrix.image }}
+        run: |
+          docker run --rm -v "$PWD:/src:ro" \
+            -e PREP="${{ matrix.prep }}" -e INSTALL_ARGS="${{ matrix.args }}" \
+            "${{ matrix.image }}" sh /src/packaging/ci-smoke.sh
+
+  bundle:
+    name: Pacote offline ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sh packaging/build-bundle.sh ${{ matrix.arch }} ${{ github.ref_type == 'tag' && github.ref_name || 'snapshot' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backuphub-linux-${{ matrix.arch }}
+          path: dist/*
+
+  offline:
+    name: Instalação offline — ${{ matrix.image }} ${{ matrix.arch }}
+    needs: bundle
+    runs-on: ${{ matrix.runner || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "centos:7", arch: x86_64 }
+          - { image: "ubuntu:18.04", arch: x86_64 }
+          - { image: "debian:11", arch: x86_64 }
+          - { image: "ubuntu:24.04", arch: x86_64 }
+          - { image: "ubuntu:24.04", arch: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: backuphub-linux-${{ matrix.arch }}
+          path: dist
+      - name: Instalar sem rede (--network none)
+        run: |
+          docker run --rm --network none -v "$PWD:/src:ro" \
+            "${{ matrix.image }}" sh -c 'BUNDLE=$(ls /src/dist/*.tar.gz) sh /src/packaging/ci-smoke.sh'
+
+  release:
+    name: Publicar release
+    if: github.ref_type == 'tag'
+    needs: [unit, distros, offline]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
