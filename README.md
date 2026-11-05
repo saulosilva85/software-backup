@@ -62,34 +62,78 @@ tests/               testes automatizados (pytest)
 
 ## Instalação
 
-### Docker (recomendado)
+O BackupHub roda em **qualquer distribuição Linux** (x86_64 e ARM64). O instalador traz um **Python próprio** (portátil), então não depende da versão do Python do sistema, e detecta automaticamente o gerenciador de pacotes (`apt`, `dnf`, `yum`, `zypper`, `apk`, `pacman`) e o sistema de inicialização (`systemd`, `OpenRC`, `SysV`).
+
+### Distribuições testadas automaticamente (a cada alteração, via GitHub Actions)
+
+| Família | Versões |
+|---|---|
+| Ubuntu | 18.04, 20.04, 22.04, 24.04 (x86_64 e ARM64) |
+| Debian | 10, 11, 12 |
+| Red Hat e derivados | CentOS 7, Rocky 8 e 9 (x86_64 e ARM64), AlmaLinux 9, Oracle Linux 8 e 9, Fedora |
+| Amazon Linux | 2 e 2023 (x86_64 e ARM64/Graviton) |
+| Outras | openSUSE Leap 15, Arch Linux, Alpine |
+
+Requisitos mínimos: 2 vCPU, 2 GB de RAM, 20 GB de disco, glibc 2.17+ (qualquer distribuição de 2014 em diante) ou Alpine.
+
+### Instalação online (uma linha)
 
 ```bash
-git clone https://github.com/saulosilva85/software-backup.git
-cd software-backup
-export BACKUPHUB_ADMIN_PASSWORD='troque-esta-senha'
-export BACKUPHUB_PUBLIC_URL='http://IP-DO-SERVIDOR:8080'
-mkdir -p backups && sudo chown 10001:10001 backups   # pasta do destino "local" (o container roda com UID 10001)
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/saulosilva85/software-backup/main/install.sh | sudo sh
 ```
 
-Acesse `http://IP-DO-SERVIDOR:8080` com o usuário `admin`. Em produção, coloque um proxy reverso com HTTPS (Nginx, Traefik, ALB) na frente e defina `BACKUPHUB_COOKIE_SECURE=1`.
+Sem `curl`: `wget -qO- https://raw.githubusercontent.com/saulosilva85/software-backup/main/install.sh | sudo sh`
 
-### Sem Docker
-
-Requer Python 3.9+ (Ubuntu 22.04+, Debian 11+, RHEL/Rocky/Alma 8 e 9, Amazon Linux 2023, SUSE 15).
+Ao final, o instalador mostra o endereço do painel e a **senha inicial do admin** (gerada aleatoriamente). Opções úteis:
 
 ```bash
-python3 -m venv venv && . venv/bin/activate
-pip install -r requirements.txt
-python -m backuphub                       # desenvolvimento (porta 8080)
-# produção:
-gunicorn --workers 1 --threads 32 --timeout 0 --bind 0.0.0.0:8080 backuphub.wsgi:app
+curl -fsSL https://raw.githubusercontent.com/saulosilva85/software-backup/main/install.sh | sudo sh -s -- \
+  --admin-password 'MinhaSenhaForte' --timezone America/Sao_Paulo --open-firewall
 ```
 
-Há uma unit systemd de exemplo em `deploy/backuphub.service`.
+| Opção | Descrição |
+|---|---|
+| `--admin-password` | Senha inicial do admin (padrão: aleatória, exibida no final) |
+| `--timezone` | Fuso dos agendamentos (padrão: o do servidor) |
+| `--public-url` | URL que os servidores Windows usam para alcançar o BackupHub |
+| `--port` | Porta do painel (padrão 8080) |
+| `--open-firewall` | Libera a porta no firewalld/ufw |
+| `--system-python` | Usa o Python do sistema (>= 3.9) em vez do portátil |
+| `--uninstall [--purge]` | Remove (com `--purge`, apaga também dados e configuração) |
 
-> Use sempre **1 worker**: o agendador e a fila de backup rodam dentro do processo (threads controlam o paralelismo).
+### Instalação offline (servidor sem internet)
+
+Baixe o pacote completo na página [Releases](https://github.com/saulosilva85/software-backup/releases) (`backuphub-<versão>-linux-x86_64.tar.gz` ou `-aarch64`), copie para o servidor e:
+
+```bash
+tar xzf backuphub-*-linux-x86_64.tar.gz
+cd backuphub-*-linux-x86_64
+sudo sh install.sh
+```
+
+O pacote inclui Python, todas as dependências e o código — não acessa a internet.
+
+### Onde os arquivos ficam
+
+| Caminho | Conteúdo |
+|---|---|
+| `/opt/backuphub` | Programa (Python portátil, dependências, código) |
+| `/etc/backuphub.env` | Configuração (porta, fuso, URL pública, webhook) |
+| `/var/lib/backuphub` | Banco de dados, chaves de criptografia e `backups/` (destino local) |
+| `/var/log/backuphub` | Logs (em sistemas sem systemd) |
+
+Serviço: `systemctl status|restart backuphub` e logs com `journalctl -u backuphub -f` (em OpenRC/SysV o instalador mostra os comandos equivalentes). **Atualizar** = executar o instalador novamente (dados e configuração são preservados).
+
+### Docker (alternativa)
+
+```bash
+git clone https://github.com/saulosilva85/software-backup.git && cd software-backup
+mkdir -p backups && sudo chown 10001:10001 backups
+BACKUPHUB_ADMIN_PASSWORD='troque-esta-senha' docker compose up -d --build
+```
+
+> Em produção, coloque um proxy reverso com HTTPS (Nginx, Traefik, ALB) na frente e defina `BACKUPHUB_COOKIE_SECURE='1'` em `/etc/backuphub.env`.
+> A ferramenta usa **1 processo** (o agendador e a fila de backup rodam dentro dele).
 
 ### Onde instalar no cliente
 
