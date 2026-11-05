@@ -40,7 +40,10 @@ jobs:
           - name: debian-10
             image: "debian:10"
             prep: "printf 'deb http://archive.debian.org/debian buster main\\n' > /etc/apt/sources.list"
-          - { name: debian-11, image: "debian:11" }
+          - name: debian-11
+            image: "debian:11"
+            # Debian 11 saiu do LTS: o repositório de segurança foi retirado do espelho oficial
+            prep: "sed -i '/security/d' /etc/apt/sources.list"
           - { name: debian-12, image: "debian:12" }
           - name: centos-7
             image: "centos:7"
