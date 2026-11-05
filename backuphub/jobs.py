@@ -1,4 +1,6 @@
 """Fila e execução de jobs de backup/restauração em threads de trabalho."""
+from __future__ import annotations
+
 import json
 import logging
 import threading

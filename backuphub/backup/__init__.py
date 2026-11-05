@@ -7,6 +7,8 @@ Modos suportados:
             sem necessidade de acesso ao sistema operacional.
 - auto:     VMs de nuvem sem credencial de SO → snapshot; demais → files.
 """
+from __future__ import annotations
+
 import re
 from datetime import datetime, timezone
 

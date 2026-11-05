@@ -1,4 +1,6 @@
 """Aplicação web (API REST + interface) do BackupHub."""
+from __future__ import annotations
+
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor

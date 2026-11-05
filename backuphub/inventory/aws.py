@@ -1,4 +1,6 @@
 """Inventário de instâncias EC2 em todas as regiões configuradas."""
+from __future__ import annotations
+
 from ..cloud import aws_regions, aws_session
 
 

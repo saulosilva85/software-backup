@@ -3,6 +3,8 @@
 Cada thread recebe sua própria conexão; o modo WAL permite leituras
 concorrentes enquanto os jobs de backup gravam o progresso.
 """
+from __future__ import annotations
+
 import json
 import sqlite3
 import threading

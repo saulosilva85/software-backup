@@ -3,6 +3,8 @@
 Todos os destinos expõem a mesma interface, de modo que o motor de backup
 não precisa saber onde os dados serão gravados.
 """
+from __future__ import annotations
+
 import hashlib
 import os
 import secrets

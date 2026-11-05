@@ -4,6 +4,8 @@ O servidor remoto executa `tar | gzip` e o fluxo é enviado diretamente
 para o destino (multipart no S3 / upload resumível no GCS), sem gravar
 arquivos temporários nem no cliente nem no BackupHub.
 """
+from __future__ import annotations
+
 import shlex
 from contextlib import closing
 

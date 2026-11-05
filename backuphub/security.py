@@ -1,4 +1,6 @@
 """Criptografia de credenciais e autenticação."""
+from __future__ import annotations
+
 import json
 from functools import wraps
 

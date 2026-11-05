@@ -1,4 +1,6 @@
 """Inventário de VMs do Google Compute Engine."""
+from __future__ import annotations
+
 from ..cloud import gcp_credentials, gcp_projects
 
 

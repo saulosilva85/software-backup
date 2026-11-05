@@ -1,4 +1,6 @@
 """Fábricas de clientes para AWS (boto3) e GCP (google-cloud)."""
+from __future__ import annotations
+
 import json
 
 

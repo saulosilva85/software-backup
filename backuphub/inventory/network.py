@@ -1,4 +1,6 @@
 """Descoberta de servidores on-premise por varredura TCP de uma faixa de rede."""
+from __future__ import annotations
+
 import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor

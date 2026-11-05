@@ -1,6 +1,8 @@
 """Execução remota em servidores Windows via WinRM (pywinrm)."""
 
 
+from __future__ import annotations
+
 class WinRMError(RuntimeError):
     pass
 

@@ -77,7 +77,7 @@ Acesse `http://IP-DO-SERVIDOR:8080` com o usuário `admin`. Em produção, coloq
 
 ### Sem Docker
 
-Requer Python 3.10+.
+Requer Python 3.9+ (Ubuntu 22.04+, Debian 11+, RHEL/Rocky/Alma 8 e 9, Amazon Linux 2023, SUSE 15).
 
 ```bash
 python3 -m venv venv && . venv/bin/activate

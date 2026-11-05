@@ -3,6 +3,8 @@
 Cada execução recebe uma etiqueta com o run_id, o que permite aplicar a
 retenção por "conjunto de snapshots" (todos os discos da mesma execução).
 """
+from __future__ import annotations
+
 import time
 
 from ..cloud import aws_session, gcp_credentials

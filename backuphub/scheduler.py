@@ -11,6 +11,8 @@ O próximo disparo fica gravado em `policies.next_run_at` (UTC). A "reserva"
 do disparo é feita com UPDATE condicional, evitando execuções duplicadas
 mesmo se houver mais de um processo rodando.
 """
+from __future__ import annotations
+
 import logging
 import threading
 from datetime import datetime, timedelta, timezone
