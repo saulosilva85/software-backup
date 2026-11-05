@@ -138,9 +138,13 @@ pkg_install() {
   case "$PKG" in
     apt-get)
       if [ "$APT_UPDATED" -eq 0 ]; then DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null; APT_UPDATED=1; fi
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@" >/dev/null ;;
-    dnf) dnf install -y -q "$@" >/dev/null ;;
-    yum) yum install -y -q "$@" >/dev/null ;;
+      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@" >/dev/null; then
+        warn "Falha no apt (espelho desatualizado?); atualizando índices e tentando novamente"
+        sleep 5; DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends --fix-missing "$@" >/dev/null
+      fi ;;
+    dnf) dnf install -y -q "$@" >/dev/null || { sleep 5; dnf install -y -q --refresh "$@" >/dev/null; } ;;
+    yum) yum install -y -q "$@" >/dev/null || { sleep 5; yum clean metadata >/dev/null 2>&1; yum install -y -q "$@" >/dev/null; } ;;
     zypper) zypper --non-interactive --quiet install --no-recommends "$@" >/dev/null ;;
     apk) apk add --no-cache --quiet "$@" >/dev/null ;;
     pacman) pacman -Sy --noconfirm --needed --quiet "$@" >/dev/null ;;
