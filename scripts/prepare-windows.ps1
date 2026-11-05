@@ -32,9 +32,9 @@ New-NetFirewallRule -DisplayName "BackupHub WinRM" -Direction Inbound -Protocol 
   -RemoteAddress $BackupHubIP -Action Allow | Out-Null
 
 if ($CreateUser) {
-  $pwd = Read-Host "Senha para $UserName" -AsSecureString
+  $senha = Read-Host "Senha para $UserName" -AsSecureString
   if (-not (Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue)) {
-    New-LocalUser -Name $UserName -Password $pwd -PasswordNeverExpires -Description "BackupHub" | Out-Null
+    New-LocalUser -Name $UserName -Password $senha -PasswordNeverExpires -Description "BackupHub" | Out-Null
   }
   Add-LocalGroupMember -Group "Backup Operators" -Member $UserName -ErrorAction SilentlyContinue
   Add-LocalGroupMember -Group "Remote Management Users" -Member $UserName -ErrorAction SilentlyContinue

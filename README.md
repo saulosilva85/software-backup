@@ -69,6 +69,7 @@ git clone https://github.com/saulosilva85/software-backup.git
 cd software-backup
 export BACKUPHUB_ADMIN_PASSWORD='troque-esta-senha'
 export BACKUPHUB_PUBLIC_URL='http://IP-DO-SERVIDOR:8080'
+mkdir -p backups && sudo chown 10001:10001 backups   # pasta do destino "local" (o container roda com UID 10001)
 docker compose up -d --build
 ```
 
