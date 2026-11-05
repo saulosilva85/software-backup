@@ -56,7 +56,7 @@ def list_instances(secret: dict) -> tuple[list[dict], list[str]]:
                         "disks": disks,
                         "ip_private": ip_private,
                         "ip_public": ip_public,
-                        "address": ip_public or ip_private,
+                        "address": ip_private or ip_public,
                         "state": inst.status.lower(),
                         "tags": dict(inst.labels or {}),
                         "extra": {"project": project, "zone": zone, "machine_type": mtype, "id": str(inst.id)},

@@ -59,7 +59,7 @@ def list_instances(secret: dict) -> tuple[list[dict], list[str]]:
                     "disks": disks,
                     "ip_private": inst.get("PrivateIpAddress"),
                     "ip_public": inst.get("PublicIpAddress"),
-                    "address": inst.get("PublicIpAddress") or inst.get("PrivateIpAddress"),
+                    "address": inst.get("PrivateIpAddress") or inst.get("PublicIpAddress"),
                     "state": inst["State"]["Name"],
                     "tags": tags,
                     "extra": {"instance_type": inst["InstanceType"], "az": inst["Placement"]["AvailabilityZone"],
