@@ -1,0 +1,17 @@
+# Instalação sem Docker (systemd). Ajuste os caminhos e copie para /etc/systemd/system/.
+[Unit]
+Description=BackupHub - backup de servidores on-premise, AWS e GCP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=backuphub
+WorkingDirectory=/opt/backuphub
+Environment=BACKUPHUB_DATA_DIR=/var/lib/backuphub
+Environment=BACKUPHUB_TIMEZONE=America/Sao_Paulo
+EnvironmentFile=-/etc/backuphub.env
+ExecStart=/opt/backuphub/venv/bin/gunicorn --workers 1 --threads 32 --timeout 0 --bind 0.0.0.0:8080 backuphub.wsgi:app
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

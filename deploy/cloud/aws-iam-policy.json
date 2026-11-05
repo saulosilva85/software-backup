@@ -1,0 +1,42 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Inventario",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeRegions",
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceTypes",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeSnapshots"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Snapshots",
+      "Effect": "Allow",
+      "Action": ["ec2:CreateSnapshot", "ec2:CreateSnapshots", "ec2:CreateTags"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RetencaoSomenteSnapshotsDoBackupHub",
+      "Effect": "Allow",
+      "Action": "ec2:DeleteSnapshot",
+      "Resource": "*",
+      "Condition": { "StringLike": { "aws:ResourceTag/backuphub:run": "*" } }
+    },
+    {
+      "Sid": "BucketDeBackup",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": "arn:aws:s3:::NOME-DO-BUCKET"
+    },
+    {
+      "Sid": "ObjetosDeBackup",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:AbortMultipartUpload"],
+      "Resource": "arn:aws:s3:::NOME-DO-BUCKET/*"
+    }
+  ]
+}

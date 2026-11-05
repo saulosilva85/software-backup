@@ -1,0 +1,33 @@
+# Prepara em massa os servidores de um cliente para o BackupHub.
+#   ansible-playbook -i inventory.ini prepare-servers.yml \
+#     -e backuphub_ip=10.0.0.5 -e "backuphub_pubkey='ssh-ed25519 AAAA... backuphub'"
+- name: Servidores Linux
+  hosts: linux
+  become: true
+  vars:
+    backuphub_user: backuphub
+  tasks:
+    - name: Usuário de backup
+      ansible.builtin.user:
+        name: "{{ backuphub_user }}"
+        shell: /bin/bash
+        create_home: true
+    - name: Chave pública do BackupHub
+      ansible.posix.authorized_key:
+        user: "{{ backuphub_user }}"
+        key: "{{ backuphub_pubkey }}"
+    - name: Sudo sem senha para o backup
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/backuphub
+        mode: "0440"
+        content: "{{ backuphub_user }} ALL=(root) NOPASSWD: /bin/sh -c *, /usr/bin/sh -c *\n"
+        validate: "visudo -cf %s"
+
+- name: Servidores Windows
+  hosts: windows
+  tasks:
+    - name: Executa o script de preparação
+      ansible.windows.win_powershell:
+        script: "{{ lookup('ansible.builtin.file', '../../scripts/prepare-windows.ps1') }}"
+        parameters:
+          BackupHubIP: "{{ backuphub_ip }}"

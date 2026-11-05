@@ -1,0 +1,26 @@
+services:
+  backuphub:
+    build: .
+    image: backuphub:latest
+    container_name: backuphub
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - backuphub-data:/data
+      # Destino "Disco local / NAS": monte aqui o diretório/compartilhamento de backups.
+      - ./backups:/backups
+    environment:
+      BACKUPHUB_ADMIN_USER: admin
+      BACKUPHUB_ADMIN_PASSWORD: ${BACKUPHUB_ADMIN_PASSWORD:-admin123}
+      BACKUPHUB_TIMEZONE: ${BACKUPHUB_TIMEZONE:-America/Sao_Paulo}
+      # URL pela qual os servidores Windows alcançam o BackupHub (somente para destino local).
+      BACKUPHUB_PUBLIC_URL: ${BACKUPHUB_PUBLIC_URL:-http://backuphub.empresa.local:8080}
+      BACKUPHUB_MAX_PARALLEL_JOBS: ${BACKUPHUB_MAX_PARALLEL_JOBS:-4}
+      BACKUPHUB_WEBHOOK_URL: ${BACKUPHUB_WEBHOOK_URL:-}
+      # Opcional: fixe as chaves para não depender do volume (guarde em cofre!)
+      # BACKUPHUB_SECRET_KEY: ...
+      # BACKUPHUB_ENCRYPTION_KEY: ...
+
+volumes:
+  backuphub-data:
