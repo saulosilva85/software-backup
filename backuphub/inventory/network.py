@@ -75,6 +75,95 @@ def parse_netbios(data: bytes) -> tuple[str | None, str | None]:
         return None, None
 
 
+def _dns_name(msg: bytes, offset: int, depth: int = 0) -> tuple[str, int]:
+    """Lê um nome DNS (com compressão) e retorna (nome, offset após o nome)."""
+    labels, jumped, end = [], False, offset
+    while True:
+        length = msg[offset]
+        if length == 0:
+            offset += 1
+            break
+        if length & 0xC0 == 0xC0:
+            if depth > 10:
+                raise ValueError("compressão inválida")
+            pointer = ((length & 0x3F) << 8) | msg[offset + 1]
+            name, _ = _dns_name(msg, pointer, depth + 1)
+            labels.append(name)
+            offset += 2
+            jumped = True
+            break
+        labels.append(msg[offset + 1: offset + 1 + length].decode("utf-8", errors="replace"))
+        offset += 1 + length
+    end = offset
+    return ".".join(x for x in labels if x), end if not jumped else offset
+
+
+def parse_ptr_response(msg: bytes) -> str | None:
+    """Extrai o primeiro registro PTR de uma resposta DNS/mDNS/LLMNR."""
+    try:
+        qd, an = int.from_bytes(msg[4:6], "big"), int.from_bytes(msg[6:8], "big")
+        off = 12
+        for _ in range(qd):
+            _, off = _dns_name(msg, off)
+            off += 4
+        for _ in range(an):
+            _, off = _dns_name(msg, off)
+            rtype = int.from_bytes(msg[off:off + 2], "big")
+            rdlen = int.from_bytes(msg[off + 8:off + 10], "big")
+            off += 10
+            if rtype == 12:
+                name, _ = _dns_name(msg, off)
+                return name
+            off += rdlen
+    except (IndexError, ValueError):
+        return None
+    return None
+
+
+def _ptr_query(ip: str, port: int, unicast_bit: bool) -> bytes:
+    rev = ".".join(reversed(ip.split("."))) + ".in-addr.arpa"
+    qname = b"".join(bytes([len(p)]) + p.encode() for p in rev.split(".")) + b"\x00"
+    qclass = 0x8001 if unicast_bit else 0x0001
+    return b"\x42\x42\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00" + qname + b"\x00\x0c" + qclass.to_bytes(2, "big")
+
+
+def multicast_name(ip: str, timeout: float = 0.8) -> str | None:
+    """Nome via mDNS (Avahi/Bonjour, porta 5353) ou LLMNR (porta 5355), sem credencial.
+
+    Muitos Linux (Avahi) e Windows (LLMNR) respondem; servidores mínimos podem não responder.
+    """
+    for port, unicast in ((5353, True), (5355, False)):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.settimeout(timeout)
+                sock.sendto(_ptr_query(ip, port, unicast), (ip, port))
+                data, _ = sock.recvfrom(4096)
+        except OSError:
+            continue
+        name = parse_ptr_response(data)
+        if name:
+            return name[:-6] if name.endswith(".local") else name
+    return None
+
+
+_local_ips_cache: set[str] | None = None
+
+
+def local_ips() -> set[str]:
+    global _local_ips_cache
+    if _local_ips_cache is None:
+        ips = set()
+        for _, cidr in (_ip_command() or []):
+            ips.add(cidr.split("/")[0])
+        if not ips:
+            try:
+                ips = {cidr.split("/")[0] for _, cidr in _ioctl()}
+            except Exception:
+                pass
+        _local_ips_cache = ips
+    return _local_ips_cache
+
+
 def os_hint_from_banner(banner: str | None) -> str | None:
     """Sistema estimado pela identificação do SSH (ex.: 'SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3')."""
     if not banner:
@@ -107,11 +196,13 @@ def scan_host(ip: str, timeout: float = 0.6) -> dict | None:
         dns_name = socket.gethostbyaddr(ip)[0]
     except OSError:
         dns_name = None
-    if dns_name and dns_name.replace(".", "").replace("-", "").isdigit():
+    if dns_name and (dns_name.replace(".", "").replace("-", "").isdigit() or dns_name.startswith("localhost")):
         dns_name = None  # PTR genérico (ex.: 192-168-0-10.provedor)
+    own = socket.gethostname().split(".")[0] if ip in local_ips() else None  # o próprio servidor do BackupHub
+    mc_name = None if (nb_name or own) else multicast_name(ip, timeout + 0.4)
     return {
         "ip": ip,
-        "hostname": nb_name or dns_name,
+        "hostname": nb_name or own or mc_name or (dns_name.split(".")[0] if dns_name else None),
         "dns_name": dns_name,
         "workgroup": workgroup,
         "os_hint": os_hint_from_banner(banner),

@@ -66,7 +66,7 @@ const diskTotals = (disks) => {
 };
 const gb = (v) => (v == null ? "—" : `${Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} GB`);
 const EXTRA_LABELS = { kernel: "Kernel", uptime_s: null, cpu_model: null, hardware: null, version: "Versão / build",
-  domain: "Domínio", workgroup: "Grupo de trabalho", last_boot: null, dns_name: "Nome DNS", ssh_banner: "Identificação SSH",
+  domain: "Domínio", workgroup: null, last_boot: null, dns_name: "Nome DNS", ssh_banner: "Identificação SSH",
   instance_type: "Tipo de instância", vpc_id: "VPC", image_id: "Imagem (AMI)", machine_type: "Tipo de máquina",
   project: "Projeto", zone: "Zona", az: "Zona de disponibilidade", platform_details: "Plataforma" };
 const fmtUptime = (sec) => { const s = Number(sec); if (!s) return null; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600); return d ? `${d} dia(s) e ${h}h` : `${h}h ${Math.floor((s % 3600) / 60)}min`; };
@@ -484,7 +484,7 @@ async function credentialOptions(types, selected, emptyLabel = "— Nenhuma —"
 
 async function machineModal(machine, onDone) {
   const m = machine || { platform: "linux" };
-  const credOpts = await credentialOptions(["ssh", "winrm"], m.credential_id);
+  const credOpts = await credentialOptions(["ssh", "winrm"], m.credential_id, "Automática (testar as cadastradas)");
   openModal({
     title: machine ? "Editar servidor" : "Adicionar servidor on-premise",
     subtitle: "O BackupHub conecta via SSH (Linux) ou WinRM (Windows) — nenhum agente é instalado.",
@@ -506,10 +506,11 @@ async function machineModal(machine, onDone) {
 
 async function machineDrawer(id, onChange) {
   const m = await api(`/api/machines/${id}`);
-  const credOpts = can("operator") ? await credentialOptions(m.platform === "windows" ? ["winrm"] : ["ssh"], m.credential_id) : "";
+  const credOpts = can("operator") ? await credentialOptions(m.platform === "windows" ? ["winrm"] : ["ssh"], m.credential_id, "Automática (testar as cadastradas)") : "";
   const tags = Object.entries(m.tags || {});
   const ex = m.extra || {};
-  const extra = Object.entries(ex).filter(([k, v]) => v != null && v !== "" && EXTRA_LABELS[k] !== null)
+  const extra = Object.entries(ex).filter(([k, v]) => v != null && v !== "" && EXTRA_LABELS[k] !== null
+      && !(k === "domain" && String(v).toUpperCase() === "WORKGROUP"))
     .map(([k, v]) => [EXTRA_LABELS[k] || k, v]);
   const dt = diskTotals(m.disks);
   const notCollected = m.provider === "onprem" && m.inventory_status !== "ok";
@@ -524,7 +525,7 @@ async function machineDrawer(id, onChange) {
         <button class="btn btn-sm btn-danger" id="d-del">${icon("trash")}Remover</button></div>` : ""}
       ${m.state === "terminated" ? `<div class="alert tone-warning">${icon("alert")}<div><b>Máquina removida da nuvem${m.terminated_at ? ` em ${fmtDateTime(m.terminated_at)}` : ""}.</b> Ela não entra mais nos backups, mas o histórico e os backups já feitos continuam disponíveis para restauração em outro servidor.</div></div>` : ""}
       ${m.inventory_status === "error" ? `<div class="alert tone-danger">${icon("alert")}<div><b>Falha na coleta do inventário:</b> ${esc(m.inventory_message)}</div></div>` : ""}
-      ${notCollected && !m.credential_id ? `<div class="alert tone-info">${icon("key")}<div><b>Inventário ainda não coletado.</b> Escolha uma credencial ${credKind} em <i>Acesso ao sistema operacional</i>, logo abaixo, e clique em <b>Salvar</b>: o sistema, CPU, memória e discos são coletados automaticamente.</div></div>` : ""}
+      ${notCollected && !m.credential_id && m.inventory_status !== "error" && m.inventory_status !== "running" ? `<div class="alert tone-info">${icon("key")}<div><b>Inventário ainda não coletado.</b> Para ler sistema, CPU, memória e discos é preciso acesso ao servidor (${credKind}). Cadastre a credencial em <a href="#/credentials">Credenciais</a>: ela é <b>testada automaticamente</b> em todas as máquinas sem acesso — ou escolha uma abaixo.</div></div>` : ""}
       ${m.inventory_status === "running" ? `<div class="alert tone-info">${icon("refresh")}<div>Coletando o inventário...</div></div>` : ""}
       <dl class="kv">
         <dt>Hostname</dt><dd>${esc(m.hostname || "—")}</dd>
@@ -572,7 +573,8 @@ async function machineDrawer(id, onChange) {
   $("#d-cred-save", ctx.el).onclick = async () => {
     const v = $("#d-cred", ctx.el).value;
     await api(`/api/machines/${id}`, { method: "PUT", body: { credential_id: v ? Number(v) : null } });
-    toast(v ? "Credencial associada — coletando o inventário..." : "Credencial removida"); ctx.close(); onChange?.();
+    if (!v) await api("/api/machines/inventory", { method: "POST", body: { ids: [id] } });
+    toast(v ? "Credencial associada — coletando o inventário..." : "Testando as credenciais cadastradas..."); ctx.close(); onChange?.();
   };
 }
 
@@ -620,13 +622,13 @@ function discoverModal(onDone) {
     } catch (err) { clearInterval(timer); box.innerHTML = ""; toast(err.message, "err"); return; }
     clearInterval(timer);
     if (!hosts.length) { box.innerHTML = `<div class="empty">${icon("radar")}<div>Nenhum servidor respondeu nas portas verificadas.<br>Verifique se há firewall entre este servidor e a rede varrida.</div></div>`; return; }
-    const [linOpts, winOpts] = await Promise.all([credentialOptions(["ssh"], null, "— Sem credencial —"), credentialOptions(["winrm"], null, "— Sem credencial —")]);
+    const [linOpts, winOpts] = await Promise.all([credentialOptions(["ssh"], null, "Automática (testar as cadastradas)"), credentialOptions(["winrm"], null, "Automática (testar as cadastradas)")]);
     const fresh = hosts.filter((h) => !h.known).length;
     box.innerHTML = `
       <div class="alert tone-success">${icon("check")}<div><b>${hosts.length} servidor(es) encontrado(s)</b> em ${Math.round((Date.now() - started) / 1000)}s — ${fresh} novo(s), ${hosts.length - fresh} já no inventário.</div></div>
       <div class="card" style="margin-bottom:16px"><table><thead><tr><th style="width:36px"><input type="checkbox" id="h-all" checked></th><th>IP</th><th>Nome</th><th>Sistema (estimado)</th><th>Serviços</th><th>Plataforma</th></tr></thead><tbody>
         ${hosts.map((h, i) => `<tr><td><input type="checkbox" class="h-sel" data-i="${i}" ${h.known ? "disabled" : "checked"}></td>
-          <td class="mono">${esc(h.ip)}</td><td>${esc(h.hostname || "—")}${h.workgroup ? `<div class="sub">${esc(h.workgroup)}</div>` : ""}${h.known ? ' <span class="badge b-muted plain">já no inventário</span>' : ""}</td>
+          <td class="mono">${esc(h.ip)}</td><td>${esc(h.hostname || "—")}${h.known ? ' <span class="badge b-muted plain">já no inventário</span>' : ""}</td>
           <td class="muted">${esc(h.os_hint || (h.platform === "windows" ? "Windows" : "—"))}</td>
           <td>${h.services.map((sv) => `<span class="badge b-info plain">${sv}</span>`).join(" ")}</td>
           <td><select class="h-plat" data-i="${i}" style="width:120px"><option value="linux" ${h.platform === "linux" ? "selected" : ""}>Linux</option><option value="windows" ${h.platform === "windows" ? "selected" : ""}>Windows</option></select></td></tr>`).join("")}

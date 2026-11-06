@@ -251,6 +251,14 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
                                         "description": data.get("description"),
                                         "sync_enabled": 1 if data.get("sync_enabled", True) else 0,
                                         "data_enc": security.encrypt(secret), "created_at": db.utcnow()})
+        if data["type"] in ("ssh", "winrm"):
+            # Nova credencial: testa nas máquinas on-premise que ainda não têm acesso
+            platform = "windows" if data["type"] == "winrm" else "linux"
+            pending = [r["id"] for r in db.query(
+                "SELECT id FROM machines WHERE provider = 'onprem' AND credential_id IS NULL AND platform = ? "
+                "AND COALESCE(inventory_status, '') != 'running'", (platform,))]
+            if pending:
+                _queue_inventory(pending)
         return jsonify(credential_out(db.get("credentials", cid))), 201
 
     @app.put("/api/credentials/<int:cid>")
@@ -353,8 +361,9 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
             raise ApiError("Plataforma deve ser linux ou windows")
         mid = db.insert("machines", {**{k: data.get(k) for k in MACHINE_FIELDS}, "provider": "onprem",
                                      "state": "unknown", "inventory_status": "pending", "created_at": db.utcnow()})
-        if data.get("collect") and data.get("credential_id"):
-            _queue_inventory([mid])
+        machine = db.get("machines", mid)
+        if data.get("collect", True) and (data.get("credential_id") or inventory.candidate_credentials(machine)):
+            _queue_inventory([mid])   # sem credencial escolhida: testa as cadastradas automaticamente
         else:
             health_monitor.check_async([mid])
         return jsonify(db.get("machines", mid)), 201
@@ -446,7 +455,9 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
                                          "extra": extra, "state": "online", "last_seen_at": db.utcnow(),
                                          "inventory_status": "pending", "created_at": db.utcnow()})
             created.append(mid)
-        to_collect = [mid for mid in created if db.get("machines", mid)["credential_id"]]
+        # Coleta todas: as sem credencial escolhida testam automaticamente as credenciais cadastradas
+        to_collect = [mid for mid in created if db.get("machines", mid)["credential_id"]
+                      or inventory.candidate_credentials(db.get("machines", mid))]
         if data.get("collect", True) and to_collect:
             _queue_inventory(to_collect)
         return jsonify({"created": len(created), "inventory_queued": len(to_collect)})

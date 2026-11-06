@@ -21,8 +21,36 @@ def normalize_disks(disks):
     return out
 
 
+def _collect_os(machine: dict, secret: dict) -> dict:
+    if machine["platform"] == "windows":
+        from . import windows
+        return windows.collect(machine["address"], secret)
+    from . import linux
+    return linux.collect(machine["address"], secret)
+
+
+_NETWORK_ERRORS = ("timed out", "timeout", "refused", "unreachable", "no route", "name or service not known",
+                   "nodename nor servname", "connection reset", "max retries exceeded", "failed to establish",
+                   "unable to connect", "network is unreachable", "host is down")
+
+
+def _is_network_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(t in text for t in _NETWORK_ERRORS)
+
+
+def candidate_credentials(machine: dict) -> list[dict]:
+    """Credenciais cadastradas compatíveis com a plataforma da máquina (SSH para Linux, WinRM para Windows)."""
+    ctype = "winrm" if machine["platform"] == "windows" else "ssh"
+    return db.query("SELECT id, name FROM credentials WHERE type = ? ORDER BY id", (ctype,))
+
+
 def collect_machine(machine_id: int) -> dict:
-    """Atualiza o inventário de uma máquina conectando-se a ela."""
+    """Atualiza o inventário de uma máquina conectando-se a ela.
+
+    Sem credencial associada, testa automaticamente as credenciais cadastradas do tipo
+    certo (SSH/WinRM) e associa à máquina a primeira que funcionar.
+    """
     machine = db.get("machines", machine_id)
     if not machine:
         raise ValueError("Máquina não encontrada")
@@ -30,33 +58,16 @@ def collect_machine(machine_id: int) -> dict:
     try:
         if not cred:
             if machine["provider"] in ("aws", "gcp"):
-                # Sem credencial de SO: atualiza pelos dados da nuvem.
+                # VM de nuvem sem credencial de SO: dados vêm da API da nuvem (backup por snapshot).
                 if machine.get("cloud_credential_id"):
                     sync_cloud(machine["cloud_credential_id"])
                     return db.get("machines", machine_id)
-            raise ValueError("Associe uma credencial SSH/WinRM à máquina para coletar o inventário")
-        if machine["platform"] == "windows":
-            from . import windows
-            data = windows.collect(machine["address"], secret)
+                raise ValueError("Associe uma credencial SSH/WinRM à máquina para coletar o inventário")
+            data, found_id = _try_credentials(machine)
+            db.update("machines", machine_id, {"credential_id": found_id})
         else:
-            from . import linux
-            data = linux.collect(machine["address"], secret)
-        data["disks"] = normalize_disks(data.get("disks"))
-        values = {k: data[k] for k in UPDATABLE if data.get(k) is not None}
-        # Máquinas importadas sem nome (nome = IP) passam a usar o hostname real
-        if data.get("hostname") and machine["name"] in (machine.get("address"), machine.get("hostname"), None, ""):
-            values["name"] = data["hostname"]
-        if machine["provider"] != "onprem":
-            values.pop("state", None)
-            values.pop("ip_public", None)
-            # Mantém dados da nuvem e acrescenta os do SO.
-            values["extra"] = {**(machine.get("extra") or {}), **(data.get("extra") or {})}
-            if machine.get("disks"):  # discos da nuvem (volumes) têm prioridade
-                values.pop("disks", None)
-        values.update(inventory_status="ok", inventory_message=None, last_inventory_at=db.utcnow())
-        if machine["provider"] == "onprem":
-            values["last_seen_at"] = db.utcnow()
-        db.update("machines", machine_id, values)
+            data = _collect_os(machine, secret)
+        _save_collected(machine, data)
     except Exception as exc:
         db.update("machines", machine_id, {
             "inventory_status": "error",
@@ -65,6 +76,46 @@ def collect_machine(machine_id: int) -> dict:
         })
         raise
     return db.get("machines", machine_id)
+
+
+def _try_credentials(machine: dict) -> tuple[dict, int]:
+    kind = "WinRM (Windows)" if machine["platform"] == "windows" else "SSH (Linux)"
+    candidates = candidate_credentials(machine)
+    if not candidates:
+        raise ValueError(f"Nenhuma credencial {kind} cadastrada. Cadastre uma em Credenciais: ela será testada "
+                         f"automaticamente nas máquinas.")
+    failures = []
+    for c in candidates:
+        _, secret = credential_secret(c["id"])
+        try:
+            return _collect_os(machine, secret), c["id"]
+        except Exception as exc:
+            if _is_network_error(exc):
+                port = "5985 (WinRM)" if machine["platform"] == "windows" else "22 (SSH)"
+                raise RuntimeError(f"Não foi possível conectar em {machine['address']} na porta {port}: "
+                                   f"{str(exc)[:200]}") from exc
+            failures.append(f"'{c['name']}': {str(exc)[:120]}")
+    raise ValueError(f"Nenhuma credencial {kind} cadastrada funcionou nesta máquina — " + "; ".join(failures))
+
+
+def _save_collected(machine: dict, data: dict) -> None:
+    data["disks"] = normalize_disks(data.get("disks"))
+    values = {k: data[k] for k in UPDATABLE if data.get(k) is not None}
+    # Máquinas importadas sem nome (nome = IP) passam a usar o hostname real
+    if data.get("hostname") and machine["name"] in (machine.get("address"), machine.get("hostname"), None, ""):
+        values["name"] = data["hostname"]
+    if machine["provider"] != "onprem":
+        values.pop("state", None)
+        values.pop("ip_public", None)
+        # Mantém dados da nuvem e acrescenta os do SO.
+        values["extra"] = {**(machine.get("extra") or {}), **(data.get("extra") or {})}
+        if machine.get("disks"):  # discos da nuvem (volumes) têm prioridade
+            values.pop("disks", None)
+    else:
+        values["extra"] = {**(machine.get("extra") or {}), **(data.get("extra") or {})}
+        values["last_seen_at"] = db.utcnow()
+    values.update(inventory_status="ok", inventory_message=None, last_inventory_at=db.utcnow())
+    db.update("machines", machine["id"], values)
 
 
 def _is_protected(machine_id: int) -> dict | None:
