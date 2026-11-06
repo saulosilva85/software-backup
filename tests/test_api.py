@@ -64,3 +64,13 @@ def test_viewer_cannot_change(client, app):
 def test_dashboard(client):
     r = client.get("/api/dashboard")
     assert r.status_code == 200 and len(r.json["history"]) == 14
+
+
+def test_discovery_networks(client, monkeypatch):
+    from backuphub.inventory import network
+    monkeypatch.setattr(network, "_ip_command", lambda: [("enp0s3", "192.168.18.180/24")])
+    client.post("/api/machines", json={"name": "filial", "address": "10.20.0.15", "platform": "linux"}, headers=HEADERS)
+    client.post("/api/machines", json={"name": "local", "address": "192.168.18.50", "platform": "linux"}, headers=HEADERS)
+    r = client.get("/api/discovery/networks").json
+    assert [n["network"] for n in r["local"]] == ["192.168.18.0/24"]
+    assert r["inventory"] == [{"network": "10.20.0.0/24", "hosts": 254, "machines": 1}]

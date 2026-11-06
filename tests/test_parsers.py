@@ -65,3 +65,13 @@ def test_powershell_escaping():
     script = render_backup_script(["C:\\Users", "D:\\Dados d'agua"], [], "https://x/?a=1&b='2'", {"A": "b"})
     assert "'[\"C:\\\\Users\", \"D:\\\\Dados d''agua\"]'" in script
     assert "'https://x/?a=1&b=''2'''" in script
+
+
+def test_local_networks(monkeypatch):
+    monkeypatch.setattr(network, "_ip_command", lambda: [
+        ("lo", "127.0.0.1/8"), ("enp0s3", "192.168.18.180/24"), ("docker0", "172.17.0.1/16"),
+        ("ens5", "10.50.3.7/16"), ("eth1", "10.128.0.5/32"), ("eth2", "192.168.18.181/24")])
+    nets = network.local_networks()
+    assert [n["network"] for n in nets] == ["192.168.18.0/24", "10.50.3.0/24", "10.128.0.0/24"]
+    assert nets[0]["interface"] == "enp0s3" and nets[0]["hosts"] == 254 and nets[0]["note"] is None
+    assert "grande" in nets[1]["note"] and "ponto a ponto" in nets[2]["note"]

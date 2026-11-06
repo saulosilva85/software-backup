@@ -541,24 +541,56 @@ async function machineDrawer(id, onChange) {
 
 function discoverModal(onDone) {
   let hosts = [];
+  let nets = { local: [], inventory: [], max_hosts: 1024 };
   const ctx = openModal({
     title: "Descobrir servidores na rede", wide: true,
-    subtitle: "Varre a faixa informada procurando SSH (22), SMB (445), RDP (3389) e WinRM (5985/5986).",
-    body: `<div class="actions" style="margin-bottom:16px"><input id="scan-target" style="flex:1" placeholder="Ex.: 192.168.0.0/24, 10.0.0.10-50, srv01.empresa.local">
-      <button class="btn btn-primary" id="scan-go">${icon("radar")}Varrer</button></div><div id="scan-res"></div>`,
+    subtitle: "Procura servidores Linux (SSH 22) e Windows (SMB 445, RDP 3389, WinRM 5985/5986) nas redes deste servidor.",
+    body: `<div id="scan-nets"><div class="muted"><span class="spin" style="display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-right:8px"></span>Detectando as redes deste servidor...</div></div>
+      <div class="field" style="margin-top:14px"><label>Outras faixas (opcional)</label>
+        <div class="actions"><input id="scan-extra" style="flex:1" placeholder="Ex.: 10.20.0.0/24, 172.16.5.10-50, srv01.empresa.local">
+        <button class="btn btn-primary" id="scan-go">${icon("radar")}Varrer</button></div>
+        <span class="hint">Faixas de outras VLANs, filiais ou datacenters alcançáveis por este servidor (máximo de 1.024 endereços por varredura).</span></div>
+      <div id="scan-res"></div>`,
   });
   const box = $("#scan-res", ctx.el);
-  $("#scan-go", ctx.el).onclick = (e) => withBusy(e.currentTarget, async () => {
+  const netBox = $("#scan-nets", ctx.el);
+
+  const selectedTargets = () => [
+    ...$$(".net-sel:checked", ctx.el).map((c) => c.value),
+    ...$("#scan-extra", ctx.el).value.split(",").map((x) => x.trim()).filter(Boolean),
+  ];
+
+  const renderNets = () => {
+    const row = (n, checked, extra) => `<label class="check" style="padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-weight:500">
+      <input type="checkbox" class="net-sel" value="${esc(n.network)}" ${checked ? "checked" : ""}>
+      <span><b class="mono">${esc(n.network)}</b> <span class="muted">${extra}</span>${n.note ? `<br><span class="hint">${esc(n.note)}</span>` : ""}</span></label>`;
+    netBox.innerHTML = `
+      <div class="section-title" style="margin-top:0">Redes deste servidor</div>
+      ${nets.local.length ? `<div class="chips" style="gap:8px">${nets.local.map((n) => row(n, true, `· interface ${esc(n.interface)} · IP ${esc(n.address)} · ${n.hosts} endereços`)).join("")}</div>`
+        : '<div class="muted">Nenhuma rede detectada automaticamente. Informe a faixa abaixo.</div>'}
+      ${nets.inventory.length ? `<div class="section-title">Outras redes onde já há servidores no inventário</div>
+        <div class="chips" style="gap:8px">${nets.inventory.map((n) => row(n, false, `· ${n.machines} servidor(es) no inventário`)).join("")}</div>` : ""}`;
+  };
+
+  const runScan = async (btn) => {
+    const targets = selectedTargets();
+    if (!targets.length) { toast("Selecione uma rede ou informe uma faixa", "err"); return; }
+    const started = Date.now();
+    box.innerHTML = `<div class="alert tone-info">${icon("radar")}<div><b>Varrendo ${esc(targets.join(", "))}</b><br><span id="scan-time">Isso costuma levar de 10 a 40 segundos...</span></div></div>`;
+    const timer = setInterval(() => { const t = $("#scan-time", box); if (t) t.textContent = `Varrendo... ${Math.round((Date.now() - started) / 1000)}s`; }, 1000);
     try {
-      hosts = await api("/api/discovery/scan", { method: "POST", body: { target: $("#scan-target", ctx.el).value } });
-    } catch (err) { toast(err.message, "err"); return; }
-    if (!hosts.length) { box.innerHTML = `<div class="empty">${icon("radar")}<div>Nenhum host respondeu nas portas verificadas</div></div>`; return; }
+      hosts = await api("/api/discovery/scan", { method: "POST", body: { target: targets.join(", ") } });
+    } catch (err) { clearInterval(timer); box.innerHTML = ""; toast(err.message, "err"); return; }
+    clearInterval(timer);
+    if (!hosts.length) { box.innerHTML = `<div class="empty">${icon("radar")}<div>Nenhum servidor respondeu nas portas verificadas.<br>Verifique se há firewall entre este servidor e a rede varrida.</div></div>`; return; }
     const [linOpts, winOpts] = await Promise.all([credentialOptions(["ssh"], null, "— Sem credencial —"), credentialOptions(["winrm"], null, "— Sem credencial —")]);
+    const fresh = hosts.filter((h) => !h.known).length;
     box.innerHTML = `
+      <div class="alert tone-success">${icon("check")}<div><b>${hosts.length} servidor(es) encontrado(s)</b> em ${Math.round((Date.now() - started) / 1000)}s — ${fresh} novo(s), ${hosts.length - fresh} já no inventário.</div></div>
       <div class="card" style="margin-bottom:16px"><table><thead><tr><th style="width:36px"><input type="checkbox" id="h-all" checked></th><th>IP</th><th>Hostname</th><th>Serviços</th><th>Plataforma</th></tr></thead><tbody>
         ${hosts.map((h, i) => `<tr><td><input type="checkbox" class="h-sel" data-i="${i}" ${h.known ? "disabled" : "checked"}></td>
           <td class="mono">${esc(h.ip)}</td><td>${esc(h.hostname || "—")}${h.known ? ' <span class="badge b-muted plain">já no inventário</span>' : ""}</td>
-          <td>${h.services.map((s) => `<span class="badge b-info plain">${s}</span>`).join(" ")}</td>
+          <td>${h.services.map((sv) => `<span class="badge b-info plain">${sv}</span>`).join(" ")}</td>
           <td><select class="h-plat" data-i="${i}" style="width:120px"><option value="linux" ${h.platform === "linux" ? "selected" : ""}>Linux</option><option value="windows" ${h.platform === "windows" ? "selected" : ""}>Windows</option></select></td></tr>`).join("")}
       </tbody></table></div>
       <div class="row"><div class="field"><label>Credencial para os Linux</label><select id="c-lin">${linOpts}</select></div>
@@ -567,12 +599,22 @@ function discoverModal(onDone) {
     $("#h-all", box).onclick = (ev) => $$(".h-sel:not(:disabled)", box).forEach((c) => (c.checked = ev.target.checked));
     $("#h-import", box).onclick = (ev) => withBusy(ev.currentTarget, async () => {
       const chosen = $$(".h-sel", box).filter((c) => c.checked).map((c) => ({ ...hosts[c.dataset.i], platform: $(`.h-plat[data-i="${c.dataset.i}"]`, box).value }));
-      if (!chosen.length) return toast("Selecione ao menos um host", "err");
+      if (!chosen.length) return toast("Selecione ao menos um servidor", "err");
       const r = await api("/api/discovery/import", { method: "POST", body: {
         hosts: chosen, credential_linux: Number($("#c-lin", box).value) || null, credential_windows: Number($("#c-win", box).value) || null } });
-      toast(`${r.created} servidor(es) importado(s)${r.inventory_queued ? `, inventário em andamento` : ""}`); ctx.close(); onDone?.();
+      toast(`${r.created} servidor(es) importado(s)${r.inventory_queued ? ", inventário em andamento" : ""}`); ctx.close(); onDone?.();
     });
-  });
+  };
+
+  $("#scan-go", ctx.el).onclick = (e) => withBusy(e.currentTarget, () => runScan());
+  $("#scan-extra", ctx.el).onkeydown = (e) => { if (e.key === "Enter") $("#scan-go", ctx.el).click(); };
+
+  (async () => {
+    try { nets = await api("/api/discovery/networks"); } catch { /* segue com o campo manual */ }
+    renderNets();
+    // Varre automaticamente as redes do próprio servidor ao abrir
+    if (nets.local.length) $("#scan-go", ctx.el).click();
+  })();
 }
 
 async function cloudSyncModal(onDone) {

@@ -89,3 +89,93 @@ def scan(target: str, timeout: float = 0.6, workers: int = 128) -> list[dict]:
     found = [r for r in results if r]
     found.sort(key=lambda r: ipaddress.ip_address(r["ip"]))
     return found
+
+
+# ----------------------------------------------------------------------------
+# Detecção automática das redes do próprio servidor do BackupHub
+# ----------------------------------------------------------------------------
+# Interfaces virtuais que não representam a rede do cliente (containers, bridges, VPN de pods...).
+_SKIP_IFACES = ("lo", "docker", "br-", "veth", "virbr", "cni", "flannel", "cali", "vxlan", "kube", "podman", "lxc")
+_DEFAULT_PREFIX = 24  # rede sugerida quando a interface é grande demais (/16) ou ponto a ponto (/32)
+
+
+def _ip_command() -> list[tuple[str, str]]:
+    """[(interface, 'ip/prefixo')] via `ip -o -4 addr` (iproute2)."""
+    import subprocess
+    try:
+        out = subprocess.run(["ip", "-o", "-4", "addr", "show"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    items = []
+    for line in out.splitlines():
+        parts = line.split()
+        if "inet" in parts:
+            items.append((parts[1].rstrip(":"), parts[parts.index("inet") + 1]))
+    return items
+
+
+def _ioctl() -> list[tuple[str, str]]:
+    """Alternativa sem o comando `ip`: consulta o kernel diretamente (Linux)."""
+    import fcntl
+    import struct
+    items = []
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        for _, name in socket.if_nameindex():
+            req = struct.pack("256s", name[:15].encode())
+            try:
+                addr = socket.inet_ntoa(fcntl.ioctl(sock.fileno(), 0x8915, req)[20:24])   # SIOCGIFADDR
+                mask = socket.inet_ntoa(fcntl.ioctl(sock.fileno(), 0x891B, req)[20:24])   # SIOCGIFNETMASK
+            except OSError:
+                continue
+            prefix = ipaddress.ip_network(f"0.0.0.0/{mask}").prefixlen
+            items.append((name, f"{addr}/{prefix}"))
+    finally:
+        sock.close()
+    return items
+
+
+def local_networks() -> list[dict]:
+    """Redes IPv4 do servidor, prontas para varredura (no máximo MAX_HOSTS endereços cada)."""
+    raw = _ip_command()
+    if not raw:
+        try:
+            raw = _ioctl()
+        except Exception:
+            raw = []
+    result, seen = [], set()
+    for iface, cidr in raw:
+        if iface.startswith(_SKIP_IFACES):
+            continue
+        intf = ipaddress.ip_interface(cidr)
+        if intf.ip.is_loopback or intf.ip.is_link_local:
+            continue
+        net, note = intf.network, None
+        if net.num_addresses > MAX_HOSTS + 2:
+            net = ipaddress.ip_interface(f"{intf.ip}/{_DEFAULT_PREFIX}").network
+            note = f"A rede {intf.network} é grande; sugerida a faixa /{_DEFAULT_PREFIX} deste servidor"
+        elif net.prefixlen >= 31:  # comum em nuvem (GCP usa /32)
+            net = ipaddress.ip_interface(f"{intf.ip}/{_DEFAULT_PREFIX}").network
+            note = f"Interface ponto a ponto; sugerida a faixa /{_DEFAULT_PREFIX} deste servidor"
+        if str(net) in seen:
+            continue
+        seen.add(str(net))
+        result.append({"interface": iface, "address": str(intf.ip), "network": str(net),
+                       "hosts": max(net.num_addresses - 2, 1), "note": note})
+    return result
+
+
+def inventory_networks(addresses: list[str], exclude: list[str]) -> list[dict]:
+    """Faixas /24 onde já existem máquinas no inventário e que não são redes deste servidor."""
+    excluded = [ipaddress.ip_network(n) for n in exclude]
+    counts: dict[str, int] = {}
+    for addr in addresses:
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if ip.version != 4 or ip.is_loopback or any(ip in n for n in excluded):
+            continue
+        net = str(ipaddress.ip_interface(f"{ip}/24").network)
+        counts[net] = counts.get(net, 0) + 1
+    return [{"network": n, "hosts": 254, "machines": c} for n, c in sorted(counts.items())]

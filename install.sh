@@ -253,7 +253,8 @@ setup_python() {
 # ----------------------------------------------------------------- código
 fetch_source() {
   if [ -n "$SOURCE_DIR" ]; then :
-  elif [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/backuphub/__init__.py" ]; then SOURCE_DIR="$SCRIPT_DIR"
+  elif [ -n "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "$PREFIX/app" ] && [ -f "$SCRIPT_DIR/backuphub/__init__.py" ]; then
+    SOURCE_DIR="$SCRIPT_DIR"   # pacote offline ou cópia do repositório (a cópia instalada baixa a versão nova)
   elif [ "$OFFLINE" -eq 1 ]; then die "Pacote offline incompleto (pasta backuphub/ não encontrada)"
   else
     log "Baixando o BackupHub ($REPO@$BRANCH)"

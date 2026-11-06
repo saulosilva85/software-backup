@@ -392,6 +392,15 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
         _queue_inventory(ids)
         return jsonify({"queued": len(ids)}), 202
 
+    @app.get("/api/discovery/networks")
+    @role_required("operator")
+    def discovery_networks():
+        local = network.local_networks()
+        addresses = [m["address"] for m in db.query("SELECT address FROM machines WHERE address IS NOT NULL "
+                                                    "AND provider = 'onprem'")]
+        return jsonify({"local": local, "inventory": network.inventory_networks(
+            addresses, [n["network"] for n in local]), "max_hosts": network.MAX_HOSTS})
+
     @app.post("/api/discovery/scan")
     @role_required("operator")
     def discovery_scan():
