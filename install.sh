@@ -218,6 +218,13 @@ setup_python() {
     fi
   fi
 
+  if [ "$SYSTEM_PY" -eq 0 ] && [ -x "$PREFIX/python/bin/python3" ] \
+     && [ "$("$PREFIX/python/bin/python3" -c 'import platform; print(platform.python_version())' 2>/dev/null)" = "$PBS_PY" ]; then
+    PY="$PREFIX/python/bin/python3"
+    ok "Python portátil $PBS_PY já instalado (reaproveitado, sem download)"
+    return
+  fi
+
   if [ "$SYSTEM_PY" -eq 0 ]; then
     tarball=""
     if [ "$OFFLINE" -eq 1 ]; then
@@ -275,12 +282,29 @@ fetch_source() {
   ok "Código instalado em $PREFIX/app"
 }
 
+file_hash() {
+  if have sha256sum; then sha256sum "$1" | cut -d' ' -f1
+  elif have shasum; then shasum -a 256 "$1" | cut -d' ' -f1
+  else cksum "$1" | cut -d' ' -f1; fi
+}
+
 setup_venv() {
+  req="$PREFIX/app/requirements.txt"
+  stamp="$PREFIX/venv/.backuphub-deps"
+  want="$(file_hash "$req") $("$PY" -c 'import sys; print(sys.executable)')"
+  # Reaproveita quando: mesma lista de dependências (ou instalação anterior sem registro), mesmo Python
+  # de base e todas as bibliotecas importáveis.
+  if [ -x "$PREFIX/venv/bin/python" ] && { [ ! -f "$stamp" ] || [ "$(cat "$stamp")" = "$want" ]; } \
+     && [ "$("$PREFIX/venv/bin/python" -c 'import sys; print(sys.base_prefix)' 2>/dev/null)" = "$("$PY" -c 'import sys; print(sys.base_prefix)')" ] \
+     && "$PREFIX/venv/bin/python" -c 'import flask, cryptography, paramiko, winrm, boto3, gunicorn' 2>/dev/null; then
+    echo "$want" > "$stamp"
+    ok "Dependências já instaladas e atualizadas (reaproveitadas, sem download)"
+    return
+  fi
   log "Criando ambiente Python e instalando dependências (pode levar alguns minutos)"
   rm -rf "$PREFIX/venv"
   "$PY" -m venv "$PREFIX/venv"
   VPY="$PREFIX/venv/bin/python"
-  req="$PREFIX/app/requirements.txt"
   if [ "$OFFLINE" -eq 1 ]; then
     "$VPY" -m pip install -q --no-index --find-links "$BUNDLE_DIR/wheels" -r "$req" \
       || die "Falha ao instalar dependências do pacote offline"
@@ -292,6 +316,7 @@ setup_venv() {
     fi
   fi
   "$VPY" -c 'import flask, cryptography, paramiko, winrm, boto3, gunicorn' || die "Dependências incompletas"
+  echo "$want" > "$stamp"
   ok "Dependências instaladas"
 }
 
