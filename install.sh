@@ -54,7 +54,7 @@ GENERATED_PASSWORD=""
 if [ -t 1 ]; then B="$(printf '\033[1m')"; G="$(printf '\033[32m')"; Y="$(printf '\033[33m')"; R="$(printf '\033[31m')"; C="$(printf '\033[36m')"; N="$(printf '\033[0m')"
 else B=""; G=""; Y=""; R=""; C=""; N=""; fi
 log()  { printf '%s==>%s %s\n' "$C$B" "$N" "$*"; }
-ok()   { printf '%s ✔%s  %s\n' "$G" "$N" "$*"; }
+ok()   { printf '%s[OK]%s %s\n' "$G" "$N" "$*"; }
 warn() { printf '%s[aviso]%s %s\n' "$Y" "$N" "$*" >&2; }
 die()  { printf '%s[erro]%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
