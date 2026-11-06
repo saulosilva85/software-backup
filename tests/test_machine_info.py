@@ -139,13 +139,12 @@ def test_auto_credential_stops_on_network_error(client, monkeypatch):
     assert len(tried) == 1                        # não insiste em todas as credenciais se a máquina não responde
 
 
-def test_no_credentials_registered_message(app):
+def test_no_credentials_registered_is_not_an_error(app):
     from backuphub.inventory import collect_machine
-    import pytest
     mid = db.insert("machines", {"name": "x", "address": "10.1.1.2", "platform": "windows", "provider": "onprem",
                                  "created_at": db.utcnow()})
-    with pytest.raises(ValueError, match="Nenhuma credencial WinRM"):
-        collect_machine(mid)
+    m = collect_machine(mid)
+    assert m["inventory_status"] == "pending" and m["inventory_message"] is None
 
 
 def test_new_credential_is_tested_on_machines_without_access(client, monkeypatch):

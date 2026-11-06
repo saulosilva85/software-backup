@@ -39,6 +39,10 @@ def _is_network_error(exc: Exception) -> bool:
     return any(t in text for t in _NETWORK_ERRORS)
 
 
+class NoCredentials(Exception):
+    """Não há credencial cadastrada para a plataforma: não é uma falha, apenas falta configuração."""
+
+
 def candidate_credentials(machine: dict) -> list[dict]:
     """Credenciais cadastradas compatíveis com a plataforma da máquina (SSH para Linux, WinRM para Windows)."""
     ctype = "winrm" if machine["platform"] == "windows" else "ssh"
@@ -68,6 +72,9 @@ def collect_machine(machine_id: int) -> dict:
         else:
             data = _collect_os(machine, secret)
         _save_collected(machine, data)
+    except NoCredentials:
+        db.update("machines", machine_id, {"inventory_status": "pending", "inventory_message": None})
+        return db.get("machines", machine_id)
     except Exception as exc:
         db.update("machines", machine_id, {
             "inventory_status": "error",
@@ -82,8 +89,7 @@ def _try_credentials(machine: dict) -> tuple[dict, int]:
     kind = "WinRM (Windows)" if machine["platform"] == "windows" else "SSH (Linux)"
     candidates = candidate_credentials(machine)
     if not candidates:
-        raise ValueError(f"Nenhuma credencial {kind} cadastrada. Cadastre uma em Credenciais: ela será testada "
-                         f"automaticamente nas máquinas.")
+        raise NoCredentials(f"Nenhuma credencial {kind} cadastrada")
     failures = []
     for c in candidates:
         _, secret = credential_secret(c["id"])

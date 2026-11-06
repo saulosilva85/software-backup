@@ -425,7 +425,7 @@ async function pageInventory(el) {
     const allOn = machines.every((m) => selected.has(m.id));
     box.innerHTML = `<table><thead><tr>
         <th style="width:36px"><input type="checkbox" id="sel-all" ${allOn ? "checked" : ""}></th>
-        <th>Máquina</th><th>Origem</th><th>Sistema</th><th>Recursos</th><th>Estado</th><th>Inventário</th><th>Último backup</th></tr></thead>
+        <th>Máquina</th><th>Origem</th><th>Sistema</th><th>Estado</th><th>Inventário</th><th>Último backup</th></tr></thead>
       <tbody>${machines.map((m) => {
         const dt = diskTotals(m.disks);
         const lb = m.last_backup;
@@ -434,7 +434,6 @@ async function pageInventory(el) {
           <td><div class="title">${esc(m.name)}</div><div class="sub mono">${esc(m.address || m.ip_private || "—")}${m.hostname && m.hostname !== m.name ? ` · ${esc(m.hostname)}` : ""}</div></td>
           <td>${provBadge(m.provider)}${m.region ? `<div class="sub">${esc(m.region)}</div>` : ""}</td>
           <td><div>${platformLabel(m.platform)}</div><div class="sub ellipsis" style="max-width:220px">${esc(m.os || "")}</div></td>
-          <td class="muted nowrap">${m.cpu ? `${m.cpu} vCPU` : "—"} · ${m.memory_mb ? fmtBytes(m.memory_mb * 1048576) : "—"}<br>${dt.size ? `${gb(Math.round(dt.size))} disco${dt.known ? ` · ${gb(Math.round(dt.free))} livres` : ""}` : ""}</td>
           <td>${machineBadge(m.state || "unknown")}${m.state === "terminated" && m.terminated_at ? `<div class="sub">${fmtDateTime(m.terminated_at)}</div>`
             : ["offline", "unreachable"].includes(m.state) ? `<div class="sub">${m.last_seen_at ? `visto ${fmtRelative(m.last_seen_at)}` : "nunca respondeu"}</div>` : ""}</td>
           <td>${m.inventory_status === "running" ? '<span class="badge b-running">Coletando</span>' : badge(m.inventory_status || "pending")}
@@ -524,39 +523,20 @@ async function machineDrawer(id, onChange) {
         ${m.provider === "onprem" ? `<button class="btn btn-sm" id="d-edit">${icon("edit")}Editar</button>` : ""}
         <button class="btn btn-sm btn-danger" id="d-del">${icon("trash")}Remover</button></div>` : ""}
       ${m.state === "terminated" ? `<div class="alert tone-warning">${icon("alert")}<div><b>Máquina removida da nuvem${m.terminated_at ? ` em ${fmtDateTime(m.terminated_at)}` : ""}.</b> Ela não entra mais nos backups, mas o histórico e os backups já feitos continuam disponíveis para restauração em outro servidor.</div></div>` : ""}
-      ${m.inventory_status === "error" ? `<div class="alert tone-danger">${icon("alert")}<div><b>Falha na coleta do inventário:</b> ${esc(m.inventory_message)}</div></div>` : ""}
-      ${notCollected && !m.credential_id && m.inventory_status !== "error" && m.inventory_status !== "running" ? `<div class="alert tone-info">${icon("key")}<div><b>Inventário ainda não coletado.</b> Para ler sistema, CPU, memória e discos é preciso acesso ao servidor (${credKind}). Cadastre a credencial em <a href="#/credentials">Credenciais</a>: ela é <b>testada automaticamente</b> em todas as máquinas sem acesso — ou escolha uma abaixo.</div></div>` : ""}
-      ${m.inventory_status === "running" ? `<div class="alert tone-info">${icon("refresh")}<div>Coletando o inventário...</div></div>` : ""}
+      ${m.inventory_status === "error" ? `<div class="alert tone-danger">${icon("alert")}<div><b>Falha ao acessar o servidor:</b> ${esc(m.inventory_message)}</div></div>` : ""}
       <dl class="kv">
         <dt>Hostname</dt><dd>${esc(m.hostname || "—")}</dd>
         <dt>Endereço</dt><dd class="mono">${esc(m.address || "—")}</dd>
         <dt>IP privado / público</dt><dd class="mono">${esc(m.ip_private || "—")} / ${esc(m.ip_public || "—")}</dd>
         <dt>Sistema</dt><dd>${esc(m.os || "—")}</dd>
-        <dt>CPU</dt><dd>${m.cpu ? `${m.cpu} vCPU` : "—"}${ex.cpu_model ? `<div class="muted">${esc(ex.cpu_model)}</div>` : ""}</dd>
-        <dt>Memória</dt><dd>${m.memory_mb ? fmtBytes(m.memory_mb * 1048576) : "—"}</dd>
-        <dt>Disco (total)</dt><dd>${dt.size ? `${gb(dt.size)}${dt.known ? ` · ${gb(dt.used)} usados · <b>${gb(dt.free)} livres</b>` : ""}` : "—"}</dd>
-        ${ex.hardware ? `<dt>Hardware</dt><dd>${esc(ex.hardware)}</dd>` : ""}
-        ${ex.uptime_s && fmtUptime(ex.uptime_s) ? `<dt>Ligado há</dt><dd>${fmtUptime(ex.uptime_s)}</dd>` : ""}
-        ${ex.last_boot ? `<dt>Último boot</dt><dd>${fmtDateTime(ex.last_boot)}</dd>` : ""}
-        ${m.provider === "onprem" ? `<dt>Último contato</dt><dd>${m.last_seen_at ? `${fmtDateTime(m.last_seen_at)} (${fmtRelative(m.last_seen_at)})` : "—"}</dd>` : ""}
         ${m.instance_id ? `<dt>ID da instância</dt><dd class="mono">${esc(m.instance_id)}</dd>` : ""}
         ${m.region ? `<dt>Região / zona</dt><dd>${esc(m.region)}</dd>` : ""}
-        ${extra.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}
+        <dt>Último contato</dt><dd>${m.last_seen_at ? `${fmtDateTime(m.last_seen_at)} (${fmtRelative(m.last_seen_at)})` : "—"}</dd>
         <dt>Último inventário</dt><dd>${fmtDateTime(m.last_inventory_at)}</dd>
       </dl>
       ${can("operator") ? `<div class="section-title">Acesso ao sistema operacional</div>
         <div class="actions"><select id="d-cred" style="flex:1">${credOpts}</select><button class="btn" id="d-cred-save">Salvar</button></div>
-        <div class="hint muted" style="margin-top:6px">${m.provider !== "onprem" ? "Sem credencial, VMs de nuvem usam backup por snapshot de disco. Com credencial, é possível o backup de arquivos para o bucket." : "Obrigatória para inventário e backup."}</div>` : ""}
-      <div class="section-title">Discos</div>
-      ${(m.disks || []).length ? `<div class="card"><table><thead><tr><th>Disco</th><th>Tamanho</th><th>Usado</th><th>Livre</th><th>Uso</th></tr></thead><tbody>
-        ${m.disks.map((d) => {
-          const free = d.free_gb != null ? d.free_gb : (d.size_gb != null && d.used_gb != null ? d.size_gb - d.used_gb : null);
-          const pct = d.used_gb != null && d.size_gb ? Math.min(100, Math.round((d.used_gb / d.size_gb) * 100)) : null;
-          return `<tr><td><div class="mono">${esc(d.mount || d.device)}</div><div class="sub">${esc([d.label, d.mount && d.device !== d.mount ? d.device : null, d.volume_id, d.type].filter(Boolean).join(" · "))}</div></td>
-          <td class="nowrap">${gb(d.size_gb)}</td><td class="nowrap">${gb(d.used_gb)}</td><td class="nowrap"><b>${gb(free)}</b></td>
-          <td>${pct != null ? `<div style="display:flex;align-items:center;gap:8px"><div class="progress" style="width:70px"><div style="width:${pct}%;${pct >= 90 ? "background:#ef4444" : ""}"></div></div><span class="muted">${pct}%</span></div>` : "—"}</td></tr>`;
-        }).join("")}
-      </tbody></table></div>` : `<div class="muted">${notCollected ? "Disponível após a coleta do inventário" : "Sem informações de disco"}</div>`}
+        <div class="hint muted" style="margin-top:6px">${m.provider !== "onprem" ? "Sem credencial, VMs de nuvem usam backup por snapshot de disco. Com credencial, é possível o backup de arquivos para o bucket." : "Necessária para executar backups. Em Automática, as credenciais cadastradas são testadas."}</div>` : ""}
       ${tags.length ? `<div class="section-title">Tags / labels</div><div class="chips">${tags.map(([k, v]) => `<span class="chip" style="padding-right:10px">${esc(k)}: ${esc(v)}</span>`).join("")}</div>` : ""}
       <div class="section-title">Histórico de backups</div>
       <div class="card">${jobsTable(m.jobs, { compact: true, hideMachine: true })}</div>`,

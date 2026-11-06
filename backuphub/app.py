@@ -451,7 +451,7 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
             mid = db.insert("machines", {"name": h.get("hostname") or h["ip"], "hostname": h.get("hostname"),
                                          "address": h["ip"], "platform": platform, "provider": "onprem",
                                          "credential_id": cred or None,
-                                         "os": f"{h['os_hint']} (estimado)" if h.get("os_hint") else None,
+                                         "os": f"{h.get('os_hint') or platform.capitalize()} (estimado)",
                                          "extra": extra, "state": "online", "last_seen_at": db.utcnow(),
                                          "inventory_status": "pending", "created_at": db.utcnow()})
             created.append(mid)
