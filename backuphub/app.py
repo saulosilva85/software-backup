@@ -453,7 +453,8 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
                                          "credential_id": cred or None,
                                          "os": f"{h.get('os_hint') or platform.capitalize()} (estimado)",
                                          "extra": extra, "state": "online", "last_seen_at": db.utcnow(),
-                                         "inventory_status": "pending", "created_at": db.utcnow()})
+                                         "inventory_status": "discovered", "last_inventory_at": db.utcnow(),
+                                         "created_at": db.utcnow()})
             created.append(mid)
         # Coleta todas: as sem credencial escolhida testam automaticamente as credenciais cadastradas
         to_collect = [mid for mid in created if db.get("machines", mid)["credential_id"]

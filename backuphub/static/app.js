@@ -43,7 +43,7 @@ const DAYS_FULL = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", 
 const STATUS = {
   success: ["Sucesso", "b-success"], warning: ["Com avisos", "b-warning"], failed: ["Falhou", "b-danger"],
   running: ["Executando", "b-running"], queued: ["Na fila", "b-muted"], ok: ["OK", "b-success"],
-  error: ["Erro", "b-danger"], pending: ["Pendente", "b-muted"], online: ["Online", "b-success"],
+  error: ["Erro", "b-danger"], pending: ["Verificando", "b-muted"], discovered: ["Básico", "b-info"], online: ["Online", "b-success"],
   unreachable: ["Inacessível", "b-danger"], unknown: ["Desconhecido", "b-muted"],
   stopped: ["Parada", "b-muted"], terminated: ["Removida", "b-muted"], terminating: ["Removendo", "b-warning"],
   stopping: ["Parando", "b-warning"],
@@ -436,7 +436,7 @@ async function pageInventory(el) {
           <td><div>${platformLabel(m.platform)}</div><div class="sub ellipsis" style="max-width:220px">${esc(m.os || "")}</div></td>
           <td>${machineBadge(m.state || "unknown")}${m.state === "terminated" && m.terminated_at ? `<div class="sub">${fmtDateTime(m.terminated_at)}</div>`
             : ["offline", "unreachable"].includes(m.state) ? `<div class="sub">${m.last_seen_at ? `visto ${fmtRelative(m.last_seen_at)}` : "nunca respondeu"}</div>` : ""}</td>
-          <td>${m.inventory_status === "running" ? '<span class="badge b-running">Coletando</span>' : badge(m.inventory_status || "pending")}
+          <td title="${m.inventory_status === "discovered" ? "Informações obtidas pela rede (nome, IP, sistema estimado). Com uma credencial cadastrada o inventário fica completo." : m.inventory_status === "ok" ? "Informações lidas do próprio sistema, via credencial." : ""}">${m.inventory_status === "running" ? '<span class="badge b-running">Coletando</span>' : m.inventory_status === "ok" ? '<span class="badge b-success">Completo</span>' : badge(m.inventory_status || "pending")}
             ${m.inventory_status === "error" ? `<div class="sub ellipsis" style="max-width:200px" title="${esc(m.inventory_message)}">${esc(m.inventory_message)}</div>` : `<div class="sub">${fmtRelative(m.last_inventory_at)}</div>`}</td>
           <td>${lb ? `${badge(lb.status)}<div class="sub">${fmtRelative(lb.finished_at)}</div>` : '<span class="muted">Nunca</span>'}</td></tr>`;
       }).join("")}</tbody></table>`;

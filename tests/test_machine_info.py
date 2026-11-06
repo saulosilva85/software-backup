@@ -88,6 +88,7 @@ def test_health_online_offline_and_alert(app, monkeypatch):
     assert health.check_all() == {mid: "online"}
     seen = db.get("machines", mid)["last_seen_at"]
     assert seen
+    assert db.get("machines", mid)["inventory_status"] == "discovered"   # respondeu na rede: inventário básico
     up["10.0.0.1"] = False                      # máquina desligada
     assert health.check_all() == {mid: "offline"}
     m = db.get("machines", mid)
@@ -144,7 +145,7 @@ def test_no_credentials_registered_is_not_an_error(app):
     mid = db.insert("machines", {"name": "x", "address": "10.1.1.2", "platform": "windows", "provider": "onprem",
                                  "created_at": db.utcnow()})
     m = collect_machine(mid)
-    assert m["inventory_status"] == "pending" and m["inventory_message"] is None
+    assert m["inventory_status"] == "discovered" and m["inventory_message"] is None and m["last_inventory_at"]
 
 
 def test_new_credential_is_tested_on_machines_without_access(client, monkeypatch):

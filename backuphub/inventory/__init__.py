@@ -73,7 +73,9 @@ def collect_machine(machine_id: int) -> dict:
             data = _collect_os(machine, secret)
         _save_collected(machine, data)
     except NoCredentials:
-        db.update("machines", machine_id, {"inventory_status": "pending", "inventory_message": None})
+        # Sem credencial: fica o inventário básico, obtido pela rede (nome, IP, sistema estimado, online/offline)
+        db.update("machines", machine_id, {"inventory_status": "discovered", "inventory_message": None,
+                                           "last_inventory_at": machine.get("last_inventory_at") or db.utcnow()})
         return db.get("machines", machine_id)
     except Exception as exc:
         db.update("machines", machine_id, {
