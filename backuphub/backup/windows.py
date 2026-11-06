@@ -7,6 +7,8 @@ Fluxo de backup:
    Windows Server 2019+/Windows 10+, ou Compress-Archive como alternativa).
 3. O próprio servidor envia o .zip para a URL e remove o arquivo temporário.
 """
+from __future__ import annotations
+
 import json
 
 from ..config import Config

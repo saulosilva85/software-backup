@@ -1,4 +1,6 @@
 """Configuração da aplicação via variáveis de ambiente."""
+from __future__ import annotations
+
 import os
 import secrets
 from pathlib import Path

@@ -1,4 +1,6 @@
 """Executa o BackupHub: `python -m backuphub`."""
+from __future__ import annotations
+
 import logging
 
 from .app import create_app

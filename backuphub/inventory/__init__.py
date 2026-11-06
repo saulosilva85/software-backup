@@ -1,4 +1,6 @@
 """Orquestração do inventário: on-premise (SSH/WinRM) e nuvem (AWS/GCP)."""
+from __future__ import annotations
+
 from .. import db
 from ..security import credential_secret
 

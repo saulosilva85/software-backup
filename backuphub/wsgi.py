@@ -2,6 +2,8 @@
 
 Use apenas 1 worker: o agendador e a fila de jobs rodam dentro do processo.
 """
+from __future__ import annotations
+
 import logging
 
 from .app import create_app

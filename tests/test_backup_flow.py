@@ -1,4 +1,6 @@
 """Fluxo completo: backup Linux (tar via "SSH") → destino local → retenção → download → restauração."""
+from __future__ import annotations
+
 import io
 import tarfile
 import time

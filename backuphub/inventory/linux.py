@@ -1,4 +1,6 @@
 """Coleta de inventário de servidores Linux via SSH."""
+from __future__ import annotations
+
 from ..remote.ssh import SSHClient
 
 SCRIPT = r"""

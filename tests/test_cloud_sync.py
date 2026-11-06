@@ -1,4 +1,6 @@
 """Sincronização automática do inventário de nuvem e detecção de máquinas removidas."""
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 
 import pytest

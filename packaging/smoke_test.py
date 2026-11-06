@@ -1,4 +1,6 @@
 """Teste rápido de uma instalação: inicia o servidor, faz login, cria e testa um destino local."""
+from __future__ import annotations
+
 import http.cookiejar
 import json
 import os

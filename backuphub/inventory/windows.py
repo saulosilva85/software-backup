@@ -1,4 +1,6 @@
 """Coleta de inventário de servidores Windows via WinRM/PowerShell."""
+from __future__ import annotations
+
 import json
 
 from ..remote.winrm import WinRMClient
