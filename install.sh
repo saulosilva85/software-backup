@@ -384,6 +384,8 @@ BACKUPHUB_PUBLIC_URL=$(quote "$PUBLIC_URL")
 BACKUPHUB_MAX_PARALLEL_JOBS='4'
 # Sincronização automática do inventário AWS/GCP, em minutos (0 desativa)
 BACKUPHUB_CLOUD_SYNC_MINUTES='60'
+# Verificação online/offline dos servidores on-premise, em minutos (0 desativa)
+BACKUPHUB_HEALTH_MINUTES='5'
 # Senha usada apenas na criação do usuário admin (primeira execução)
 BACKUPHUB_ADMIN_USER='admin'
 BACKUPHUB_ADMIN_PASSWORD=$(quote "$ADMIN_PASSWORD")

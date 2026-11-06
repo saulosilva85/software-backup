@@ -51,9 +51,26 @@ const STATUS = {
 const MACHINE_STATE = {
   running: ["Ligada", "b-success"], online: ["Online", "b-success"], stopped: ["Desligada", "b-muted"],
   stopping: ["Desligando", "b-warning"], pending: ["Iniciando", "b-info"], terminated: ["Removida", "b-muted"],
-  unreachable: ["Inacessível", "b-danger"], unknown: ["Desconhecido", "b-muted"], suspended: ["Suspensa", "b-muted"],
+  unreachable: ["Offline", "b-danger"], offline: ["Offline", "b-danger"], unknown: ["Verificando", "b-muted"], suspended: ["Suspensa", "b-muted"],
 };
 const machineBadge = (st) => { const [l, c] = MACHINE_STATE[st] || [st || "—", "b-muted"]; return `<span class="badge ${c}">${esc(l)}</span>`; };
+const diskTotals = (disks) => {
+  const t = { size: 0, used: 0, free: 0, known: false };
+  for (const d of disks || []) {
+    t.size += Number(d.size_gb) || 0;
+    if (d.used_gb != null) { t.used += Number(d.used_gb) || 0; t.known = true; }
+    if (d.free_gb != null) t.free += Number(d.free_gb) || 0;
+    else if (d.size_gb != null && d.used_gb != null) t.free += (Number(d.size_gb) - Number(d.used_gb));
+  }
+  return t;
+};
+const gb = (v) => (v == null ? "—" : `${Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} GB`);
+const EXTRA_LABELS = { kernel: "Kernel", uptime_s: null, cpu_model: null, hardware: null, version: "Versão / build",
+  domain: "Domínio", workgroup: "Grupo de trabalho", last_boot: null, dns_name: "Nome DNS", ssh_banner: "Identificação SSH",
+  instance_type: "Tipo de instância", vpc_id: "VPC", image_id: "Imagem (AMI)", machine_type: "Tipo de máquina",
+  project: "Projeto", zone: "Zona", az: "Zona de disponibilidade", platform_details: "Plataforma" };
+const fmtUptime = (sec) => { const s = Number(sec); if (!s) return null; const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600); return d ? `${d} dia(s) e ${h}h` : `${h}h ${Math.floor((s % 3600) / 60)}min`; };
+
 const MODES = { auto: "Automático", files: "Arquivos", snapshot: "Snapshot" };
 const CRED_TYPES = {
   ssh: { label: "SSH (Linux)", desc: "Usuário + senha ou chave privada" },
@@ -410,15 +427,16 @@ async function pageInventory(el) {
         <th style="width:36px"><input type="checkbox" id="sel-all" ${allOn ? "checked" : ""}></th>
         <th>Máquina</th><th>Origem</th><th>Sistema</th><th>Recursos</th><th>Estado</th><th>Inventário</th><th>Último backup</th></tr></thead>
       <tbody>${machines.map((m) => {
-        const disk = (m.disks || []).reduce((s, d) => s + (Number(d.size_gb) || 0), 0);
+        const dt = diskTotals(m.disks);
         const lb = m.last_backup;
         return `<tr class="clickable ${selected.has(m.id) ? "selected" : ""}" data-id="${m.id}">
           <td><input type="checkbox" class="sel" data-id="${m.id}" ${selected.has(m.id) ? "checked" : ""}></td>
-          <td><div class="title">${esc(m.name)}</div><div class="sub mono">${esc(m.address || m.ip_private || "—")}</div></td>
+          <td><div class="title">${esc(m.name)}</div><div class="sub mono">${esc(m.address || m.ip_private || "—")}${m.hostname && m.hostname !== m.name ? ` · ${esc(m.hostname)}` : ""}</div></td>
           <td>${provBadge(m.provider)}${m.region ? `<div class="sub">${esc(m.region)}</div>` : ""}</td>
           <td><div>${platformLabel(m.platform)}</div><div class="sub ellipsis" style="max-width:220px">${esc(m.os || "")}</div></td>
-          <td class="muted nowrap">${m.cpu ? `${m.cpu} vCPU` : "—"} · ${m.memory_mb ? fmtBytes(m.memory_mb * 1048576) : "—"}<br>${disk ? `${disk.toFixed(0)} GB disco` : ""}</td>
-          <td>${machineBadge(m.state || "unknown")}${m.state === "terminated" && m.terminated_at ? `<div class="sub">${fmtDateTime(m.terminated_at)}</div>` : ""}</td>
+          <td class="muted nowrap">${m.cpu ? `${m.cpu} vCPU` : "—"} · ${m.memory_mb ? fmtBytes(m.memory_mb * 1048576) : "—"}<br>${dt.size ? `${gb(Math.round(dt.size))} disco${dt.known ? ` · ${gb(Math.round(dt.free))} livres` : ""}` : ""}</td>
+          <td>${machineBadge(m.state || "unknown")}${m.state === "terminated" && m.terminated_at ? `<div class="sub">${fmtDateTime(m.terminated_at)}</div>`
+            : ["offline", "unreachable"].includes(m.state) ? `<div class="sub">${m.last_seen_at ? `visto ${fmtRelative(m.last_seen_at)}` : "nunca respondeu"}</div>` : ""}</td>
           <td>${m.inventory_status === "running" ? '<span class="badge b-running">Coletando</span>' : badge(m.inventory_status || "pending")}
             ${m.inventory_status === "error" ? `<div class="sub ellipsis" style="max-width:200px" title="${esc(m.inventory_message)}">${esc(m.inventory_message)}</div>` : `<div class="sub">${fmtRelative(m.last_inventory_at)}</div>`}</td>
           <td>${lb ? `${badge(lb.status)}<div class="sub">${fmtRelative(lb.finished_at)}</div>` : '<span class="muted">Nunca</span>'}</td></tr>`;
@@ -490,7 +508,12 @@ async function machineDrawer(id, onChange) {
   const m = await api(`/api/machines/${id}`);
   const credOpts = can("operator") ? await credentialOptions(m.platform === "windows" ? ["winrm"] : ["ssh"], m.credential_id) : "";
   const tags = Object.entries(m.tags || {});
-  const extra = Object.entries(m.extra || {}).filter(([, v]) => v != null && v !== "");
+  const ex = m.extra || {};
+  const extra = Object.entries(ex).filter(([k, v]) => v != null && v !== "" && EXTRA_LABELS[k] !== null)
+    .map(([k, v]) => [EXTRA_LABELS[k] || k, v]);
+  const dt = diskTotals(m.disks);
+  const notCollected = m.provider === "onprem" && m.inventory_status !== "ok";
+  const credKind = m.platform === "windows" ? "WinRM (Windows)" : "SSH (Linux)";
   const ctx = openModal({
     drawer: true, title: m.name, subtitle: `${provBadge(m.provider)} &nbsp; ${platformLabel(m.platform)} &nbsp; ${machineBadge(m.state || "unknown")}`,
     body: `
@@ -500,12 +523,21 @@ async function machineDrawer(id, onChange) {
         ${m.provider === "onprem" ? `<button class="btn btn-sm" id="d-edit">${icon("edit")}Editar</button>` : ""}
         <button class="btn btn-sm btn-danger" id="d-del">${icon("trash")}Remover</button></div>` : ""}
       ${m.state === "terminated" ? `<div class="alert tone-warning">${icon("alert")}<div><b>Máquina removida da nuvem${m.terminated_at ? ` em ${fmtDateTime(m.terminated_at)}` : ""}.</b> Ela não entra mais nos backups, mas o histórico e os backups já feitos continuam disponíveis para restauração em outro servidor.</div></div>` : ""}
-      ${m.inventory_status === "error" ? `<div class="alert tone-danger">${icon("alert")}<div>${esc(m.inventory_message)}</div></div>` : ""}
+      ${m.inventory_status === "error" ? `<div class="alert tone-danger">${icon("alert")}<div><b>Falha na coleta do inventário:</b> ${esc(m.inventory_message)}</div></div>` : ""}
+      ${notCollected && !m.credential_id ? `<div class="alert tone-info">${icon("key")}<div><b>Inventário ainda não coletado.</b> Escolha uma credencial ${credKind} em <i>Acesso ao sistema operacional</i>, logo abaixo, e clique em <b>Salvar</b>: o sistema, CPU, memória e discos são coletados automaticamente.</div></div>` : ""}
+      ${m.inventory_status === "running" ? `<div class="alert tone-info">${icon("refresh")}<div>Coletando o inventário...</div></div>` : ""}
       <dl class="kv">
+        <dt>Hostname</dt><dd>${esc(m.hostname || "—")}</dd>
         <dt>Endereço</dt><dd class="mono">${esc(m.address || "—")}</dd>
         <dt>IP privado / público</dt><dd class="mono">${esc(m.ip_private || "—")} / ${esc(m.ip_public || "—")}</dd>
         <dt>Sistema</dt><dd>${esc(m.os || "—")}</dd>
-        <dt>CPU / Memória</dt><dd>${m.cpu || "—"} vCPU · ${m.memory_mb ? fmtBytes(m.memory_mb * 1048576) : "—"}</dd>
+        <dt>CPU</dt><dd>${m.cpu ? `${m.cpu} vCPU` : "—"}${ex.cpu_model ? `<div class="muted">${esc(ex.cpu_model)}</div>` : ""}</dd>
+        <dt>Memória</dt><dd>${m.memory_mb ? fmtBytes(m.memory_mb * 1048576) : "—"}</dd>
+        <dt>Disco (total)</dt><dd>${dt.size ? `${gb(dt.size)}${dt.known ? ` · ${gb(dt.used)} usados · <b>${gb(dt.free)} livres</b>` : ""}` : "—"}</dd>
+        ${ex.hardware ? `<dt>Hardware</dt><dd>${esc(ex.hardware)}</dd>` : ""}
+        ${ex.uptime_s && fmtUptime(ex.uptime_s) ? `<dt>Ligado há</dt><dd>${fmtUptime(ex.uptime_s)}</dd>` : ""}
+        ${ex.last_boot ? `<dt>Último boot</dt><dd>${fmtDateTime(ex.last_boot)}</dd>` : ""}
+        ${m.provider === "onprem" ? `<dt>Último contato</dt><dd>${m.last_seen_at ? `${fmtDateTime(m.last_seen_at)} (${fmtRelative(m.last_seen_at)})` : "—"}</dd>` : ""}
         ${m.instance_id ? `<dt>ID da instância</dt><dd class="mono">${esc(m.instance_id)}</dd>` : ""}
         ${m.region ? `<dt>Região / zona</dt><dd>${esc(m.region)}</dd>` : ""}
         ${extra.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}
@@ -515,10 +547,15 @@ async function machineDrawer(id, onChange) {
         <div class="actions"><select id="d-cred" style="flex:1">${credOpts}</select><button class="btn" id="d-cred-save">Salvar</button></div>
         <div class="hint muted" style="margin-top:6px">${m.provider !== "onprem" ? "Sem credencial, VMs de nuvem usam backup por snapshot de disco. Com credencial, é possível o backup de arquivos para o bucket." : "Obrigatória para inventário e backup."}</div>` : ""}
       <div class="section-title">Discos</div>
-      ${(m.disks || []).length ? `<div class="card"><table><thead><tr><th>Dispositivo</th><th>Montagem / volume</th><th>Tamanho</th><th>Uso</th></tr></thead><tbody>
-        ${m.disks.map((d) => `<tr><td class="mono">${esc(d.device)}</td><td class="mono">${esc(d.mount || d.volume_id || d.disk || "—")}</td><td>${d.size_gb ?? "—"} GB</td>
-          <td>${d.used_gb != null && d.size_gb ? `<div class="progress" style="width:90px"><div style="width:${Math.min(100, (d.used_gb / d.size_gb) * 100)}%"></div></div>` : "—"}</td></tr>`).join("")}
-      </tbody></table></div>` : '<div class="muted">Sem informações de disco</div>'}
+      ${(m.disks || []).length ? `<div class="card"><table><thead><tr><th>Disco</th><th>Tamanho</th><th>Usado</th><th>Livre</th><th>Uso</th></tr></thead><tbody>
+        ${m.disks.map((d) => {
+          const free = d.free_gb != null ? d.free_gb : (d.size_gb != null && d.used_gb != null ? d.size_gb - d.used_gb : null);
+          const pct = d.used_gb != null && d.size_gb ? Math.min(100, Math.round((d.used_gb / d.size_gb) * 100)) : null;
+          return `<tr><td><div class="mono">${esc(d.mount || d.device)}</div><div class="sub">${esc([d.label, d.mount && d.device !== d.mount ? d.device : null, d.volume_id, d.type].filter(Boolean).join(" · "))}</div></td>
+          <td class="nowrap">${gb(d.size_gb)}</td><td class="nowrap">${gb(d.used_gb)}</td><td class="nowrap"><b>${gb(free)}</b></td>
+          <td>${pct != null ? `<div style="display:flex;align-items:center;gap:8px"><div class="progress" style="width:70px"><div style="width:${pct}%;${pct >= 90 ? "background:#ef4444" : ""}"></div></div><span class="muted">${pct}%</span></div>` : "—"}</td></tr>`;
+        }).join("")}
+      </tbody></table></div>` : `<div class="muted">${notCollected ? "Disponível após a coleta do inventário" : "Sem informações de disco"}</div>`}
       ${tags.length ? `<div class="section-title">Tags / labels</div><div class="chips">${tags.map(([k, v]) => `<span class="chip" style="padding-right:10px">${esc(k)}: ${esc(v)}</span>`).join("")}</div>` : ""}
       <div class="section-title">Histórico de backups</div>
       <div class="card">${jobsTable(m.jobs, { compact: true, hideMachine: true })}</div>`,
@@ -535,7 +572,7 @@ async function machineDrawer(id, onChange) {
   $("#d-cred-save", ctx.el).onclick = async () => {
     const v = $("#d-cred", ctx.el).value;
     await api(`/api/machines/${id}`, { method: "PUT", body: { credential_id: v ? Number(v) : null } });
-    toast("Credencial associada"); onChange?.();
+    toast(v ? "Credencial associada — coletando o inventário..." : "Credencial removida"); ctx.close(); onChange?.();
   };
 }
 
@@ -587,9 +624,10 @@ function discoverModal(onDone) {
     const fresh = hosts.filter((h) => !h.known).length;
     box.innerHTML = `
       <div class="alert tone-success">${icon("check")}<div><b>${hosts.length} servidor(es) encontrado(s)</b> em ${Math.round((Date.now() - started) / 1000)}s — ${fresh} novo(s), ${hosts.length - fresh} já no inventário.</div></div>
-      <div class="card" style="margin-bottom:16px"><table><thead><tr><th style="width:36px"><input type="checkbox" id="h-all" checked></th><th>IP</th><th>Hostname</th><th>Serviços</th><th>Plataforma</th></tr></thead><tbody>
+      <div class="card" style="margin-bottom:16px"><table><thead><tr><th style="width:36px"><input type="checkbox" id="h-all" checked></th><th>IP</th><th>Nome</th><th>Sistema (estimado)</th><th>Serviços</th><th>Plataforma</th></tr></thead><tbody>
         ${hosts.map((h, i) => `<tr><td><input type="checkbox" class="h-sel" data-i="${i}" ${h.known ? "disabled" : "checked"}></td>
-          <td class="mono">${esc(h.ip)}</td><td>${esc(h.hostname || "—")}${h.known ? ' <span class="badge b-muted plain">já no inventário</span>' : ""}</td>
+          <td class="mono">${esc(h.ip)}</td><td>${esc(h.hostname || "—")}${h.workgroup ? `<div class="sub">${esc(h.workgroup)}</div>` : ""}${h.known ? ' <span class="badge b-muted plain">já no inventário</span>' : ""}</td>
+          <td class="muted">${esc(h.os_hint || (h.platform === "windows" ? "Windows" : "—"))}</td>
           <td>${h.services.map((sv) => `<span class="badge b-info plain">${sv}</span>`).join(" ")}</td>
           <td><select class="h-plat" data-i="${i}" style="width:120px"><option value="linux" ${h.platform === "linux" ? "selected" : ""}>Linux</option><option value="windows" ${h.platform === "windows" ? "selected" : ""}>Windows</option></select></td></tr>`).join("")}
       </tbody></table></div>

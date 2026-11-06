@@ -4,7 +4,21 @@ from __future__ import annotations
 from .. import db
 from ..security import credential_secret
 
-UPDATABLE = ("os", "cpu", "memory_mb", "disks", "ip_private", "ip_public", "state", "extra")
+UPDATABLE = ("hostname", "os", "cpu", "memory_mb", "disks", "ip_private", "ip_public", "state", "extra")
+
+
+def normalize_disks(disks):
+    """Garante tamanho, usado e livre (GB) em todos os discos."""
+    out = []
+    for d in disks or []:
+        d = dict(d)
+        size, used, free = d.get("size_gb"), d.get("used_gb"), d.get("free_gb")
+        if free is None and size is not None and used is not None:
+            d["free_gb"] = round(size - used, 1)
+        if used is None and size is not None and free is not None:
+            d["used_gb"] = round(size - free, 1)
+        out.append(d)
+    return out
 
 
 def collect_machine(machine_id: int) -> dict:
@@ -27,7 +41,11 @@ def collect_machine(machine_id: int) -> dict:
         else:
             from . import linux
             data = linux.collect(machine["address"], secret)
+        data["disks"] = normalize_disks(data.get("disks"))
         values = {k: data[k] for k in UPDATABLE if data.get(k) is not None}
+        # Máquinas importadas sem nome (nome = IP) passam a usar o hostname real
+        if data.get("hostname") and machine["name"] in (machine.get("address"), machine.get("hostname"), None, ""):
+            values["name"] = data["hostname"]
         if machine["provider"] != "onprem":
             values.pop("state", None)
             values.pop("ip_public", None)
@@ -36,13 +54,14 @@ def collect_machine(machine_id: int) -> dict:
             if machine.get("disks"):  # discos da nuvem (volumes) têm prioridade
                 values.pop("disks", None)
         values.update(inventory_status="ok", inventory_message=None, last_inventory_at=db.utcnow())
+        if machine["provider"] == "onprem":
+            values["last_seen_at"] = db.utcnow()
         db.update("machines", machine_id, values)
     except Exception as exc:
         db.update("machines", machine_id, {
             "inventory_status": "error",
             "inventory_message": str(exc)[:500],
             "last_inventory_at": db.utcnow(),
-            **({"state": "unreachable"} if machine["provider"] == "onprem" else {}),
         })
         raise
     return db.get("machines", machine_id)

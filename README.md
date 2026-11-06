@@ -8,7 +8,7 @@ Plataforma web de **inventário e backup** de servidores **Windows e Linux on-pr
 
 | Área | O que faz |
 |---|---|
-| **Inventário on-premise** | Descoberta por varredura de rede (CIDR, faixas ou lista de IPs) detectando SSH, SMB, RDP e WinRM; cadastro manual; coleta de SO, CPU, memória, discos e IPs via SSH (Linux) e WinRM/PowerShell (Windows). **Sem agente.** |
+| **Inventário on-premise** | Descoberta por varredura de rede (CIDR, faixas ou lista de IPs) detectando SSH, SMB, RDP e WinRM; cadastro manual; coleta de hostname, SO, CPU (quantidade e modelo), memória, discos (tamanho, usado e livre), fabricante/modelo e IPs via SSH (Linux) e WinRM/PowerShell (Windows). **Sem agente.** A descoberta já identifica o nome (NetBIOS/DNS) e estima o sistema sem credencial. Estado **online/offline** verificado a cada 5 min, com alerta quando um servidor protegido fica offline. |
 | **Inventário de nuvem** | Sincroniza instâncias **EC2** (todas as regiões ou as escolhidas, com AssumeRole) e VMs do **Compute Engine** (um ou mais projetos), com tipo, vCPU, memória, volumes, IPs e tags. **Sincronização automática** (padrão: a cada 60 min): instâncias novas entram no inventário sozinhas; EC2 terminadas / VMs excluídas saem do inventário e dos backups (histórico e backups preservados) e geram **alerta** se estavam protegidas. |
 | **Backup de arquivos** | Linux: `tar.gz` transmitido via SSH direto para o bucket (multipart no S3, upload resumível no GCS) — sem arquivos temporários. Windows: o servidor compacta em `.zip` (`tar.exe` nativo ou `Compress-Archive`) e envia para uma URL assinada. |
 | **Backup por snapshot** | Snapshots nativos de discos EBS (AWS, multi-volume consistente) e Persistent Disk (GCP) — não precisa de acesso ao sistema operacional. |
@@ -198,6 +198,7 @@ ansible-playbook -i inventory.ini prepare-servers.yml -e backuphub_ip=10.0.0.5 \
 | `BACKUPHUB_MAX_PARALLEL_JOBS` | `4` | Backups simultâneos |
 | `BACKUPHUB_PUBLIC_URL` | `http://localhost:8080` | URL que os servidores Windows usam para enviar ao destino local |
 | `BACKUPHUB_WEBHOOK_URL` | — | Webhook chamado quando um job falha ou termina com avisos, e quando uma máquina protegida é removida da nuvem |
+| `BACKUPHUB_HEALTH_MINUTES` | `5` | Intervalo da verificação online/offline dos servidores on-premise (0 = desativa) |
 | `BACKUPHUB_CLOUD_SYNC_MINUTES` | `60` | Intervalo da sincronização automática do inventário AWS/GCP (0 = desativa). Pode ser desligada por conta, na tela de Credenciais |
 | `BACKUPHUB_SNAPSHOT_WAIT_TIMEOUT` | `3600` | Segundos aguardando snapshots concluírem (0 = não aguarda) |
 | `BACKUPHUB_PRESIGNED_EXPIRES` | `21600` | Validade das URLs assinadas (s) |

@@ -10,6 +10,9 @@ echo "@@KERNEL"; uname -r
 echo "@@CPU"; nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo
 echo "@@MEM"; grep MemTotal /proc/meminfo | awk '{print $2}'
 echo "@@UPTIME"; cut -d. -f1 /proc/uptime 2>/dev/null
+echo "@@CPUMODEL"; grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2-
+echo "@@VENDOR"; cat /sys/class/dmi/id/sys_vendor 2>/dev/null
+echo "@@PRODUCT"; cat /sys/class/dmi/id/product_name 2>/dev/null
 echo "@@IPS"; hostname -I 2>/dev/null || ip -o -4 addr show | awk '{print $4}'
 echo "@@DISKS"; df -P -k -x tmpfs -x devtmpfs -x overlay -x squashfs 2>/dev/null | tail -n +2
 echo "@@END"
@@ -40,6 +43,7 @@ def parse(output: str) -> dict:
                 "mount": parts[5],
                 "size_gb": round(int(parts[1]) / 1024 / 1024, 1),
                 "used_gb": round(int(parts[2]) / 1024 / 1024, 1),
+                "free_gb": round(int(parts[3]) / 1024 / 1024, 1),
             })
     mem_kb = first("MEM")
     ips = " ".join(sections.get("IPS", [])).split()
@@ -50,7 +54,9 @@ def parse(output: str) -> dict:
         "memory_mb": int(mem_kb) // 1024 if (mem_kb or "").isdigit() else None,
         "disks": disks,
         "ip_private": next((ip.split("/")[0] for ip in ips if not ip.startswith("127.")), None),
-        "extra": {"kernel": first("KERNEL"), "uptime_s": first("UPTIME")},
+        "extra": {"kernel": first("KERNEL"), "uptime_s": first("UPTIME"),
+                  "cpu_model": (first("CPUMODEL") or "").strip() or None,
+                  "hardware": " ".join(x for x in (first("VENDOR"), first("PRODUCT")) if x) or None},
     }
 
 

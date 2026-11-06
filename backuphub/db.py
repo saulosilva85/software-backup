@@ -144,6 +144,8 @@ MIGRATIONS = [
     ("credentials", "last_sync_status", "TEXT"),
     ("credentials", "last_sync_message", "TEXT"),
     ("machines", "terminated_at", "TEXT"),
+    ("machines", "hostname", "TEXT"),
+    ("machines", "last_seen_at", "TEXT"),
 ]
 
 

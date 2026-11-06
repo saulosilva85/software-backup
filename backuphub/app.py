@@ -11,6 +11,7 @@ from pathlib import Path
 from flask import Flask, Response, abort, jsonify, redirect, request, send_from_directory, session, stream_with_context
 
 from . import db, inventory, jobs, scheduler, security, storage
+from . import health as health_monitor
 from .config import Config
 from .inventory import network
 from .security import credential_secret, current_user
@@ -354,6 +355,8 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
                                      "state": "unknown", "inventory_status": "pending", "created_at": db.utcnow()})
         if data.get("collect") and data.get("credential_id"):
             _queue_inventory([mid])
+        else:
+            health_monitor.check_async([mid])
         return jsonify(db.get("machines", mid)), 201
 
     @app.put("/api/machines/<int:mid>")
@@ -363,6 +366,9 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
         data = body()
         allowed = MACHINE_FIELDS if m["provider"] == "onprem" else ("credential_id", "address", "tags", "platform")
         db.update("machines", mid, {k: data[k] for k in allowed if k in data})
+        # Credencial associada/alterada: coleta o inventário automaticamente
+        if data.get("credential_id") and data.get("credential_id") != m.get("credential_id"):
+            _queue_inventory([mid])
         return jsonify(db.get("machines", mid))
 
     @app.delete("/api/machines/<int:mid>")
@@ -373,6 +379,10 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
         return jsonify({"ok": True})
 
     def _collect(mid):
+        try:
+            health_monitor.check_all([mid])
+        except Exception:
+            pass
         try:
             inventory.collect_machine(mid)
         except Exception:
@@ -427,10 +437,14 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
                 continue
             platform = h.get("platform") if h.get("platform") in ("linux", "windows") else "linux"
             cred = data.get("credential_windows") if platform == "windows" else data.get("credential_linux")
-            mid = db.insert("machines", {"name": h.get("hostname") or h["ip"], "address": h["ip"],
-                                         "platform": platform, "provider": "onprem", "credential_id": cred or None,
-                                         "state": "online", "inventory_status": "pending",
-                                         "created_at": db.utcnow()})
+            extra = {k: v for k, v in (("workgroup", h.get("workgroup")), ("dns_name", h.get("dns_name")),
+                                       ("ssh_banner", h.get("ssh_banner"))) if v}
+            mid = db.insert("machines", {"name": h.get("hostname") or h["ip"], "hostname": h.get("hostname"),
+                                         "address": h["ip"], "platform": platform, "provider": "onprem",
+                                         "credential_id": cred or None,
+                                         "os": f"{h['os_hint']} (estimado)" if h.get("os_hint") else None,
+                                         "extra": extra, "state": "online", "last_seen_at": db.utcnow(),
+                                         "inventory_status": "pending", "created_at": db.utcnow()})
             created.append(mid)
         to_collect = [mid for mid in created if db.get("machines", mid)["credential_id"]]
         if data.get("collect", True) and to_collect:
@@ -727,6 +741,7 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
     def settings():
         return jsonify({"timezone": Config.TIMEZONE, "public_url": Config.PUBLIC_URL,
                         "cloud_sync_minutes": Config.CLOUD_SYNC_MINUTES,
+                        "health_minutes": Config.HEALTH_CHECK_MINUTES,
                         "max_parallel_jobs": Config.MAX_PARALLEL_JOBS, "webhook": bool(Config.WEBHOOK_URL),
                         "scheduler": Config.SCHEDULER_ENABLED})
 

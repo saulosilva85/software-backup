@@ -37,18 +37,84 @@ def classify(open_ports: list[int], banner: str | None) -> str:
     return "unknown"
 
 
+def _nb_encode(name: bytes) -> bytes:
+    return bytes(c for b in name for c in (((b >> 4) & 0xF) + 0x41, (b & 0xF) + 0x41))
+
+
+def netbios_name(ip: str, timeout: float = 0.8) -> tuple[str | None, str | None]:
+    """Nome do computador e grupo de trabalho/domínio via NetBIOS (UDP 137), sem credenciais.
+
+    Funciona na maioria dos Windows (e Linux com Samba) na mesma rede ou com UDP 137 liberado.
+    """
+    query = (b"\x13\x37\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00" + b"\x20" + _nb_encode(b"*" + b"\x00" * 15)
+             + b"\x00\x00\x21\x00\x01")
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            sock.sendto(query, (ip, 137))
+            data, _ = sock.recvfrom(2048)
+    except OSError:
+        return None, None
+    return parse_netbios(data)
+
+
+def parse_netbios(data: bytes) -> tuple[str | None, str | None]:
+    try:
+        count = data[56]
+        name = group = None
+        for i in range(count):
+            entry = data[57 + i * 18: 57 + (i + 1) * 18]
+            label = entry[:15].decode("ascii", errors="ignore").strip()
+            suffix, flags = entry[15], int.from_bytes(entry[16:18], "big")
+            if suffix == 0x00 and not flags & 0x8000 and not name:
+                name = label
+            elif suffix == 0x00 and flags & 0x8000 and not group:
+                group = label
+        return name or None, group or None
+    except (IndexError, ValueError):
+        return None, None
+
+
+def os_hint_from_banner(banner: str | None) -> str | None:
+    """Sistema estimado pela identificação do SSH (ex.: 'SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3')."""
+    if not banner:
+        return None
+    import re
+    b = banner.lower()
+    m = re.search(r"\+deb(\d+)", b)
+    if "debian" in b:
+        return f"Debian {m.group(1)}" if m else "Debian"
+    if "ubuntu" in b:
+        return "Ubuntu"
+    if "raspbian" in b:
+        return "Raspbian"
+    if "freebsd" in b:
+        return "FreeBSD"
+    if "windows" in b:
+        return "Windows (OpenSSH)"
+    if "openssh" in b:
+        return "Linux/Unix"
+    return None
+
+
 def scan_host(ip: str, timeout: float = 0.6) -> dict | None:
     open_ports = [p for p in PORTS if _probe(ip, p, timeout)]
     if not open_ports:
         return None
     banner = _ssh_banner(ip, timeout * 2) if 22 in open_ports else None
+    nb_name, workgroup = netbios_name(ip, timeout + 0.4)
     try:
-        hostname = socket.gethostbyaddr(ip)[0]
+        dns_name = socket.gethostbyaddr(ip)[0]
     except OSError:
-        hostname = None
+        dns_name = None
+    if dns_name and dns_name.replace(".", "").replace("-", "").isdigit():
+        dns_name = None  # PTR genérico (ex.: 192-168-0-10.provedor)
     return {
         "ip": ip,
-        "hostname": hostname,
+        "hostname": nb_name or dns_name,
+        "dns_name": dns_name,
+        "workgroup": workgroup,
+        "os_hint": os_hint_from_banner(banner),
         "open_ports": open_ports,
         "services": [PORTS[p] for p in open_ports],
         "ssh_banner": banner,
@@ -179,3 +245,15 @@ def inventory_networks(addresses: list[str], exclude: list[str]) -> list[dict]:
         net = str(ipaddress.ip_interface(f"{ip}/24").network)
         counts[net] = counts.get(net, 0) + 1
     return [{"network": n, "hosts": 254, "machines": c} for n, c in sorted(counts.items())]
+
+
+# ----------------------------------------------------------------------------
+# Disponibilidade (online/offline)
+# ----------------------------------------------------------------------------
+PROBE_PORTS = {"linux": (22,), "windows": (5985, 5986, 445, 3389)}
+
+
+def is_reachable(address: str, platform: str, timeout: float = 2.0) -> bool:
+    """Responde em alguma porta de gerenciamento? (sem credencial, apenas conexão TCP)."""
+    ports = PROBE_PORTS.get(platform, (22, 5985, 445, 3389))
+    return any(_probe(address, p, timeout) for p in ports)

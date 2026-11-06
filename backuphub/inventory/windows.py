@@ -11,7 +11,8 @@ $os = Get-CimInstance Win32_OperatingSystem
 $cs = Get-CimInstance Win32_ComputerSystem
 $disks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
   [pscustomobject]@{ device = $_.DeviceID; mount = $_.DeviceID; label = $_.VolumeName;
-    size_gb = [math]::Round($_.Size / 1GB, 1); used_gb = [math]::Round(($_.Size - $_.FreeSpace) / 1GB, 1) }
+    size_gb = [math]::Round($_.Size / 1GB, 1); used_gb = [math]::Round(($_.Size - $_.FreeSpace) / 1GB, 1);
+    free_gb = [math]::Round($_.FreeSpace / 1GB, 1) }
 }
 $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254*' } | Select-Object -First 1).IPAddress
 [pscustomobject]@{
@@ -24,6 +25,8 @@ $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notli
   ip = $ip
   disks = @($disks)
   last_boot = $os.LastBootUpTime.ToString('o')
+  cpu_model = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name
+  hardware = (($cs.Manufacturer, $cs.Model) -join ' ').Trim()
 } | ConvertTo-Json -Depth 4 -Compress
 """
 
@@ -40,7 +43,8 @@ def parse(output: str) -> dict:
         "memory_mb": raw.get("memory_mb"),
         "disks": disks,
         "ip_private": raw.get("ip"),
-        "extra": {"version": raw.get("version"), "domain": raw.get("domain"), "last_boot": raw.get("last_boot")},
+        "extra": {"version": raw.get("version"), "domain": raw.get("domain"), "last_boot": raw.get("last_boot"),
+                  "cpu_model": (raw.get("cpu_model") or "").strip() or None, "hardware": raw.get("hardware") or None},
     }
 
 

@@ -155,6 +155,11 @@ def _loop() -> None:
             cloud_sync_tick()
         except Exception:
             log.exception("Erro na sincronização automática de nuvem")
+        try:
+            from . import health
+            threading.Thread(target=health.tick, daemon=True, name="health").start()
+        except Exception:
+            log.exception("Erro na verificação de disponibilidade")
 
 
 def start() -> None:
