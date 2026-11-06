@@ -241,10 +241,10 @@ function renderLayout() {
         <div class="sidebar-footer">
           <div class="user-chip"><div class="avatar">${esc(initials)}</div><div style="flex:1;min-width:0">
             <div class="ellipsis">${esc(state.user.name || state.user.username)}</div><small>${esc({ admin: "Administrador", operator: "Operador", viewer: "Leitura" }[state.user.role])}</small></div></div>
-          <div class="nav">
-            <a href="#" id="theme-toggle">${icon("moon")}Tema claro/escuro</a>
-            <a href="#" id="pw-change">${icon("lock")}Alterar senha</a>
-            <a href="#" id="logout">${icon("logout")}Sair</a>
+          <div class="user-actions">
+            <a href="#" id="theme-toggle" title="Tema claro/escuro">${icon("moon")}<span>Tema</span></a>
+            <a href="#" id="pw-change" title="Alterar senha">${icon("lock")}<span>Senha</span></a>
+            <a href="#" id="logout" title="Sair">${icon("logout")}<span>Sair</span></a>
           </div>
         </div>
       </aside>

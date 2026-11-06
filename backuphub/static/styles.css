@@ -58,11 +58,8 @@ svg.i { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-widt
 .layout { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
 .sidebar { background: var(--sidebar); color: var(--sidebar-text); padding: 20px 14px; display: flex;
   flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh; overflow-y: auto; overflow-x: hidden;
-  scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, .35) transparent; }
-.sidebar::-webkit-scrollbar { width: 8px; }
-.sidebar::-webkit-scrollbar-track { background: transparent; }
-.sidebar::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, .3); border-radius: 8px; }
-.sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, .55); }
+  scrollbar-width: none; }
+.sidebar::-webkit-scrollbar { display: none; }
 .sidebar .nav a, .sidebar .brand, .sidebar .user-chip { flex-shrink: 0; }
 
 .brand { display: flex; align-items: center; gap: 10px; color: #fff; font-weight: 700; font-size: 17px;
@@ -298,11 +295,31 @@ td .sub, .muted { color: var(--muted); font-size: 12.5px; }
   .row, .row3 { grid-template-columns: 1fr; }
 }
 
-/* Telas baixas (notebooks, janelas reduzidas): menu mais compacto */
+.user-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 2px 4px 0; }
+.user-actions a { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 4px; border-radius: 10px;
+  color: var(--sidebar-text); font-size: 11.5px; font-weight: 500; transition: background .15s, color .15s; }
+.user-actions a:hover { background: rgba(255, 255, 255, .06); color: #e2e8f0; }
+.user-actions a:last-child:hover { color: #fca5a5; }
+
+/* Telas baixas (notebooks, janelas reduzidas): menu mais compacto, sem barra de rolagem */
 @media (max-height: 760px) {
   .sidebar { padding: 14px 12px; gap: 2px; }
-  .brand { padding-bottom: 12px; }
-  .nav-label { padding: 10px 12px 4px; }
+  .brand { padding-bottom: 10px; }
+  .nav-label { padding: 8px 12px 3px; }
   .nav a { padding: 7px 12px; }
-  .sidebar-footer { padding-top: 8px; }
+  .sidebar-footer { padding-top: 6px; }
+  .user-chip { padding: 6px 10px; }
+}
+@media (max-height: 620px) {
+  .sidebar { padding: 10px 10px; gap: 0; }
+  .brand { font-size: 15px; padding: 2px 8px 6px; }
+  .brand small { display: none; }
+  .brand-logo { width: 28px; height: 28px; }
+  .nav-label { padding: 6px 12px 2px; font-size: 10px; }
+  .nav a { padding: 5px 12px; font-size: 13px; gap: 9px; }
+  .nav a svg.i { width: 16px; height: 16px; }
+  .avatar { width: 26px; height: 26px; font-size: 11px; }
+  .user-chip { padding: 4px 8px; font-size: 13px; }
+  .user-actions a { padding: 4px; flex-direction: row; justify-content: center; }
+  .user-actions a span { display: none; }
 }
