@@ -248,6 +248,7 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
             require(secret, "service_account_json")
         cid = db.insert("credentials", {"name": data["name"], "type": data["type"],
                                         "description": data.get("description"),
+                                        "sync_enabled": 1 if data.get("sync_enabled", True) else 0,
                                         "data_enc": security.encrypt(secret), "created_at": db.utcnow()})
         return jsonify(credential_out(db.get("credentials", cid))), 201
 
@@ -259,6 +260,8 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
         secret = credential_data(row["type"], data.get("data") or {}, security.decrypt(row["data_enc"]))
         db.update("credentials", cid, {"name": data.get("name", row["name"]),
                                        "description": data.get("description", row["description"]),
+                                       "sync_enabled": (1 if data["sync_enabled"] else 0) if "sync_enabled" in data
+                                       else row["sync_enabled"],
                                        "data_enc": security.encrypt(secret)})
         return jsonify(credential_out(db.get("credentials", cid)))
 
@@ -714,6 +717,7 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
     @role_required("viewer")
     def settings():
         return jsonify({"timezone": Config.TIMEZONE, "public_url": Config.PUBLIC_URL,
+                        "cloud_sync_minutes": Config.CLOUD_SYNC_MINUTES,
                         "max_parallel_jobs": Config.MAX_PARALLEL_JOBS, "webhook": bool(Config.WEBHOOK_URL),
                         "scheduler": Config.SCHEDULER_ENABLED})
 

@@ -201,6 +201,9 @@ const ROUTES = {
   users: { label: "Usuários", icon: "users", render: pageUsers, role: "admin" },
 };
 
+async function loadSettings() { try { state.settings = await api("/api/settings"); } catch { state.settings = {}; } }
+const syncLabel = () => (state.settings?.cloud_sync_minutes > 0 ? `a cada ${state.settings.cloud_sync_minutes} min` : "desativada no servidor");
+
 function setPoll(fn, ms = 5000) { clearInterval(state.poll); state.poll = fn ? setInterval(fn, ms) : null; }
 
 function renderLayout() {
@@ -292,7 +295,7 @@ function renderLogin() {
     try {
       await withBusy(btn, async () => {
         const res = await api("/api/auth/login", { method: "POST", body: readForm(e.target) });
-        state.user = res.user; state.defaultPassword = res.default_password;
+        state.user = res.user; state.defaultPassword = res.default_password; await loadSettings();
         if (!location.hash) location.hash = "#/dashboard";
         renderLayout();
       });
@@ -354,12 +357,12 @@ function kpi(ic, tone, label, value, sub) {
 
 // ------------------------------------------------------------------ Página: inventário
 async function pageInventory(el) {
-  const filters = { q: "", provider: "", platform: "" };
+  const filters = { q: "", provider: "", platform: "", include_terminated: "" };
   const selected = new Set();
   let machines = [];
 
   el.innerHTML = `
-    <div class="page-head"><div><h1>Inventário</h1><p>Servidores on-premise e máquinas virtuais na AWS e GCP</p></div>
+    <div class="page-head"><div><h1>Inventário</h1><p>Servidores on-premise e máquinas virtuais na AWS e GCP · nuvem sincronizada automaticamente ${syncLabel()}</p></div>
       <div class="actions">${can("operator") ? `
         <button class="btn" id="btn-discover">${icon("radar")}Descobrir na rede</button>
         <button class="btn" id="btn-cloud">${icon("cloud")}Sincronizar nuvem</button>
@@ -369,6 +372,7 @@ async function pageInventory(el) {
       <div class="segmented" id="f-provider">
         <button data-v="" class="on">Todos</button><button data-v="onprem">On-premise</button><button data-v="aws">AWS</button><button data-v="gcp">GCP</button></div>
       <div class="segmented" id="f-platform"><button data-v="" class="on">Todas</button><button data-v="linux">Linux</button><button data-v="windows">Windows</button></div>
+      <label class="check" style="margin-left:auto"><input type="checkbox" id="f-removed"> Mostrar removidas da nuvem</label>
     </div>
     <div id="bulk"></div>
     <div class="card"><div class="table-wrap" id="machines"></div></div>`;
@@ -414,7 +418,7 @@ async function pageInventory(el) {
           <td>${provBadge(m.provider)}${m.region ? `<div class="sub">${esc(m.region)}</div>` : ""}</td>
           <td><div>${platformLabel(m.platform)}</div><div class="sub ellipsis" style="max-width:220px">${esc(m.os || "")}</div></td>
           <td class="muted nowrap">${m.cpu ? `${m.cpu} vCPU` : "—"} · ${m.memory_mb ? fmtBytes(m.memory_mb * 1048576) : "—"}<br>${disk ? `${disk.toFixed(0)} GB disco` : ""}</td>
-          <td>${machineBadge(m.state || "unknown")}</td>
+          <td>${machineBadge(m.state || "unknown")}${m.state === "terminated" && m.terminated_at ? `<div class="sub">${fmtDateTime(m.terminated_at)}</div>` : ""}</td>
           <td>${m.inventory_status === "running" ? '<span class="badge b-running">Coletando</span>' : badge(m.inventory_status || "pending")}
             ${m.inventory_status === "error" ? `<div class="sub ellipsis" style="max-width:200px" title="${esc(m.inventory_message)}">${esc(m.inventory_message)}</div>` : `<div class="sub">${fmtRelative(m.last_inventory_at)}</div>`}</td>
           <td>${lb ? `${badge(lb.status)}<div class="sub">${fmtRelative(lb.finished_at)}</div>` : '<span class="muted">Nunca</span>'}</td></tr>`;
@@ -445,6 +449,7 @@ async function pageInventory(el) {
       filters[key] = b.dataset.v; load();
     }));
   }
+  $("#f-removed", el).onchange = (e) => { filters.include_terminated = e.target.checked ? "1" : ""; load(); };
   if (can("operator")) {
     $("#btn-add", el).onclick = () => machineModal(null, load);
     $("#btn-discover", el).onclick = () => discoverModal(load);
@@ -494,6 +499,7 @@ async function machineDrawer(id, onChange) {
         <button class="btn btn-sm btn-primary" id="d-backup">${icon("play")}Backup agora</button>
         ${m.provider === "onprem" ? `<button class="btn btn-sm" id="d-edit">${icon("edit")}Editar</button>` : ""}
         <button class="btn btn-sm btn-danger" id="d-del">${icon("trash")}Remover</button></div>` : ""}
+      ${m.state === "terminated" ? `<div class="alert tone-warning">${icon("alert")}<div><b>Máquina removida da nuvem${m.terminated_at ? ` em ${fmtDateTime(m.terminated_at)}` : ""}.</b> Ela não entra mais nos backups, mas o histórico e os backups já feitos continuam disponíveis para restauração em outro servidor.</div></div>` : ""}
       ${m.inventory_status === "error" ? `<div class="alert tone-danger">${icon("alert")}<div>${esc(m.inventory_message)}</div></div>` : ""}
       <dl class="kv">
         <dt>Endereço</dt><dd class="mono">${esc(m.address || "—")}</dd>
@@ -581,7 +587,7 @@ async function cloudSyncModal(onDone) {
       if (!id) throw new Error("Selecione uma conta");
       const r = await api("/api/cloud/sync", { method: "POST", body: { credential_id: id } });
       $("#sync-res", ctx.el).innerHTML = `<div class="alert ${r.errors.length ? "tone-warning" : "tone-success"}">${icon(r.errors.length ? "alert" : "check")}<div>
-        <b>${r.total} instância(s) encontrada(s)</b> — ${r.created} nova(s), ${r.updated} atualizada(s), ${r.removed} removida(s).
+        <b>${r.total} instância(s) encontrada(s)</b> — ${r.created} nova(s), ${r.updated} atualizada(s), ${r.removed} removida(s)${r.removed_names?.length ? `: ${r.removed_names.map(esc).join(", ")}` : ""}.
         ${r.errors.length ? `<div style="margin-top:6px">${r.errors.map(esc).join("<br>")}</div>` : ""}</div></div>`;
       onDone?.();
     } }],
@@ -926,16 +932,25 @@ async function pageCredentials(el) {
     el.innerHTML = `
       <div class="page-head"><div><h1>Credenciais</h1><p>Acesso aos servidores e às contas de nuvem — armazenadas criptografadas (AES/Fernet)</p></div>
         <div class="actions">${can("admin") ? `<button class="btn btn-primary" id="c-new">${icon("plus")}Nova credencial</button>` : ""}</div></div>
-      <div class="card">${creds.length ? `<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Tipo</th><th>Identificação</th><th>Em uso</th><th></th></tr></thead><tbody>
+      <div class="card">${creds.length ? `<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Tipo</th><th>Identificação</th><th>Em uso</th><th>Sincronização da nuvem</th><th></th></tr></thead><tbody>
         ${creds.map((c) => `<tr><td><div class="title">${esc(c.name)}</div><div class="sub">${esc(c.description || "")}</div></td>
           <td><span class="badge b-info plain">${CRED_TYPES[c.type].label}</span></td>
           <td class="mono muted">${esc(c.data.username || c.data.access_key_id || c.data.role_arn || c.data.projects || (c.type === "gcp" ? "service account" : "—"))}</td>
           <td>${c.usage} máquina(s)</td>
-          <td style="text-align:right;white-space:nowrap"><button class="btn btn-sm" data-test="${c.id}">${icon("zap")}Testar</button>
+          <td>${["aws", "gcp"].includes(c.type) ? `<div>${c.sync_enabled ? `<span class="badge b-info plain">Automática</span> <span class="muted">${syncLabel()}</span>` : '<span class="badge b-muted plain">Manual</span>'}</div>
+            <div class="sub" title="${esc(c.last_sync_message || "")}">${c.last_sync_at ? `${badge(c.last_sync_status === "warning" ? "warning" : c.last_sync_status === "error" ? "failed" : "success")} ${fmtRelative(c.last_sync_at)}` : (c.sync_enabled ? "Aguardando primeira sincronização" : "Nunca sincronizada")}</div>` : '<span class="muted">—</span>'}</td>
+          <td style="text-align:right;white-space:nowrap">${["aws", "gcp"].includes(c.type) ? `<button class="btn btn-sm" data-sync="${c.id}">${icon("refresh")}Sincronizar</button>` : ""}<button class="btn btn-sm" data-test="${c.id}">${icon("zap")}Testar</button>
             ${can("admin") ? `<button class="btn btn-sm" data-edit="${c.id}">${icon("edit")}</button><button class="btn btn-sm btn-danger" data-del="${c.id}">${icon("trash")}</button>` : ""}</td></tr>`).join("")}
       </tbody></table></div>` : `<div class="empty">${icon("key")}<h3>Nenhuma credencial</h3><div>Cadastre acessos SSH/WinRM para os servidores e chaves das contas AWS/GCP.</div></div>`}</div>`;
     if ($("#c-new", el)) $("#c-new", el).onclick = () => credentialModal(null, load);
     $$("[data-edit]", el).forEach((b) => (b.onclick = () => credentialModal(creds.find((c) => c.id === Number(b.dataset.edit)), load)));
+    $$("[data-sync]", el).forEach((b) => (b.onclick = () => withBusy(b, async () => {
+      try {
+        const r = await api("/api/cloud/sync", { method: "POST", body: { credential_id: Number(b.dataset.sync) } });
+        toast(`${r.total} instância(s): ${r.created} nova(s), ${r.updated} atualizada(s), ${r.removed} removida(s)`, r.errors.length ? "err" : "ok");
+      } catch (err) { toast(err.message, "err"); }
+      load();
+    })));
     $$("[data-del]", el).forEach((b) => (b.onclick = async () => {
       if (!(await confirmDialog("Excluir esta credencial? As máquinas que a utilizam ficarão sem acesso."))) return;
       await api(`/api/credentials/${b.dataset.del}`, { method: "DELETE" }); toast("Credencial excluída"); load();
@@ -974,10 +989,12 @@ function credentialModal(cred, onDone) {
           <div class="field"><label>Secret Access Key</label><input type="password" name="secret_access_key" placeholder="${kept}"></div></div>
         <div class="field"><label>IAM Role ARN (opcional)</label><input name="role_arn" value="${val("role_arn")}" placeholder="arn:aws:iam::123456789012:role/BackupHub"><span class="hint">Para acessar a conta do cliente via AssumeRole (recomendado). Sem access key, usa a role da instância onde o BackupHub roda.</span></div>
         <div class="row"><div class="field"><label>Região padrão</label><input name="default_region" value="${val("default_region", "us-east-1")}"></div>
-          <div class="field"><label>Regiões para inventário</label><input name="regions" value="${val("regions")}" placeholder="vazio = todas"></div></div>`,
+          <div class="field"><label>Regiões para inventário</label><input name="regions" value="${val("regions")}" placeholder="vazio = todas"></div></div>
+        <label class="check"><input type="checkbox" name="sync_enabled" ${cred ? (cred.sync_enabled ? "checked" : "") : "checked"}> Sincronizar o inventário desta conta automaticamente (${syncLabel()})</label>`,
     gcp: `<div class="field"><label>JSON da service account</label><textarea name="service_account_json" style="min-height:140px" placeholder="${cred ? kept : '{"type": "service_account", "project_id": ...}'}"></textarea>
           <span class="hint">Papéis sugeridos: Compute Viewer, Compute Storage Admin (snapshots) e Storage Object Admin no bucket.</span></div>
-        <div class="field"><label>Projetos para inventário</label><input name="projects" value="${val("projects")}" placeholder="vazio = projeto da service account"></div>`,
+        <div class="field"><label>Projetos para inventário</label><input name="projects" value="${val("projects")}" placeholder="vazio = projeto da service account"></div>
+        <label class="check"><input type="checkbox" name="sync_enabled" ${cred ? (cred.sync_enabled ? "checked" : "") : "checked"}> Sincronizar o inventário desta conta automaticamente (${syncLabel()})</label>`,
   })[t];
   const ctx = openModal({
     title: cred ? "Editar credencial" : "Nova credencial",
@@ -986,9 +1003,10 @@ function credentialModal(cred, onDone) {
         <div class="field"><label>Descrição</label><input name="description" value="${esc(cred?.description)}"></div></div>
       <div id="cred-fields">${fields(type)}</div>`,
     actions: [{ label: "Cancelar" }, { label: "Salvar", primary: true, onClick: async (c) => {
-      const { name, description, ...secret } = readForm($(".modal-body", c.el));
-      if (cred) await api(`/api/credentials/${cred.id}`, { method: "PUT", body: { name, description, data: secret } });
-      else await api("/api/credentials", { method: "POST", body: { name, description, type, data: secret } });
+      const { name, description, sync_enabled: syncEnabled, ...secret } = readForm($(".modal-body", c.el));
+      const extra = syncEnabled === undefined ? {} : { sync_enabled: syncEnabled };
+      if (cred) await api(`/api/credentials/${cred.id}`, { method: "PUT", body: { name, description, data: secret, ...extra } });
+      else await api("/api/credentials", { method: "POST", body: { name, description, type, data: secret, ...extra } });
       toast("Credencial salva"); c.close(); onDone?.();
     } }],
   });
@@ -1039,6 +1057,6 @@ async function pageUsers(el) {
   window.addEventListener("hashchange", () => { if (state.user) { $$(".overlay").forEach((o) => o.remove()); renderLayout(); } });
   try {
     const res = await api("/api/auth/me");
-    state.user = res.user; renderLayout();
+    state.user = res.user; await loadSettings(); renderLayout();
   } catch { renderLogin(); }
 })();

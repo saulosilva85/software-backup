@@ -4,6 +4,13 @@ from __future__ import annotations
 from ..cloud import gcp_credentials, gcp_projects
 
 
+# No GCP, "TERMINATED" significa VM DESLIGADA (não excluída). VMs excluídas simplesmente
+# deixam de aparecer na listagem e são marcadas como removidas pelo sincronismo.
+GCP_STATES = {"RUNNING": "running", "TERMINATED": "stopped", "STOPPING": "stopping", "STOPPED": "stopped",
+              "SUSPENDED": "suspended", "SUSPENDING": "stopping", "PROVISIONING": "pending",
+              "STAGING": "pending", "REPAIRING": "pending"}
+
+
 def _last(url: str | None) -> str | None:
     return url.rsplit("/", 1)[-1] if url else None
 
@@ -59,7 +66,7 @@ def list_instances(secret: dict) -> tuple[list[dict], list[str]]:
                         "ip_private": ip_private,
                         "ip_public": ip_public,
                         "address": ip_private or ip_public,
-                        "state": inst.status.lower(),
+                        "state": GCP_STATES.get(inst.status, inst.status.lower()),
                         "tags": dict(inst.labels or {}),
                         "extra": {"project": project, "zone": zone, "machine_type": mtype, "id": str(inst.id)},
                     })

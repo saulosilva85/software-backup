@@ -133,7 +133,25 @@ def init_db(path: str) -> None:
     close_connection()
     conn = connection()
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
+
+
+# Colunas acrescentadas após a primeira versão: aplicadas automaticamente em bancos existentes.
+MIGRATIONS = [
+    ("credentials", "sync_enabled", "INTEGER NOT NULL DEFAULT 1"),
+    ("credentials", "last_sync_at", "TEXT"),
+    ("credentials", "last_sync_status", "TEXT"),
+    ("credentials", "last_sync_message", "TEXT"),
+    ("machines", "terminated_at", "TEXT"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, ddl in MIGRATIONS:
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 def connection() -> sqlite3.Connection:

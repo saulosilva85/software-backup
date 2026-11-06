@@ -35,6 +35,8 @@ class Config:
     ADMIN_USER = os.environ.get("BACKUPHUB_ADMIN_USER", "admin")
     ADMIN_PASSWORD = os.environ.get("BACKUPHUB_ADMIN_PASSWORD", "admin123")
     # Tempo máximo (s) aguardando snapshots de nuvem concluírem.
+    # Sincronização automática do inventário AWS/GCP (minutos; 0 desativa).
+    CLOUD_SYNC_MINUTES = int(os.environ.get("BACKUPHUB_CLOUD_SYNC_MINUTES", "60"))
     SNAPSHOT_WAIT_TIMEOUT = int(os.environ.get("BACKUPHUB_SNAPSHOT_WAIT_TIMEOUT", "3600"))
     PRESIGNED_URL_EXPIRES = int(os.environ.get("BACKUPHUB_PRESIGNED_EXPIRES", "21600"))
     # URL pela qual os servidores Windows alcançam o BackupHub (usada com destino "local").

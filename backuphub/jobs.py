@@ -117,19 +117,24 @@ def _finish(job_id: int, status: str, **values) -> None:
         _notify(db.get("jobs", job_id))
 
 
-def _notify(job: dict) -> None:
+def send_webhook(text: str, payload: dict | None = None) -> None:
+    """Envia um aviso ao webhook configurado (Slack, Teams, Discord, Google Chat...)."""
     url = Config.WEBHOOK_URL
     if not url:
         return
-    text = (f"BackupHub: {job['kind']} de *{job['machine_name']}* terminou com status "
-            f"*{job['status']}* — {job.get('message') or ''}")
-    body = json.dumps({"text": text, "job": {k: job[k] for k in ("id", "machine_name", "status", "message",
-                                                                 "policy_name", "kind")}}).encode()
+    body = json.dumps({"text": text, **(payload or {})}, default=str).encode()
     try:
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=10).close()
-    except Exception as exc:  # notificação nunca derruba o job
+    except Exception as exc:  # notificação nunca derruba o processo
         log.warning("Falha ao enviar webhook: %s", exc)
+
+
+def _notify(job: dict) -> None:
+    text = (f"BackupHub: {job['kind']} de *{job['machine_name']}* terminou com status "
+            f"*{job['status']}* — {job.get('message') or ''}")
+    send_webhook(text, {"job": {k: job[k] for k in ("id", "machine_name", "status", "message",
+                                                     "policy_name", "kind")}})
 
 
 def run_backup(job_id: int) -> None:

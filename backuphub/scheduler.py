@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,9 @@ from . import db, jobs
 from .config import Config
 
 log = logging.getLogger("backuphub.scheduler")
+_sync_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cloud-sync")
+_sync_running: set[int] = set()
+_sync_lock = threading.Lock()
 _thread: threading.Thread | None = None
 _stop = threading.Event()
 
@@ -99,6 +103,44 @@ def tick(now: datetime | None = None) -> list[int]:
     return fired
 
 
+def _run_sync(credential_id: int) -> None:
+    from . import inventory
+    try:
+        r = inventory.sync_cloud(credential_id)
+        log.info("Sincronização automática da conta %s: %s", credential_id, r)
+    except Exception as exc:
+        log.warning("Falha na sincronização automática da conta %s: %s", credential_id, exc)
+    finally:
+        with _sync_lock:
+            _sync_running.discard(credential_id)
+
+
+def due_cloud_syncs(now: datetime | None = None) -> list[int]:
+    """Contas AWS/GCP com sincronização automática vencida."""
+    minutes = Config.CLOUD_SYNC_MINUTES
+    if minutes <= 0:
+        return []
+    now = now or datetime.now(timezone.utc)
+    limit = (now - timedelta(minutes=max(minutes, 5))).isoformat()
+    rows = db.query("SELECT id FROM credentials WHERE type IN ('aws', 'gcp') AND sync_enabled = 1 "
+                    "AND (last_sync_at IS NULL OR last_sync_at <= ?)", (limit,))
+    return [r["id"] for r in rows]
+
+
+def cloud_sync_tick(now: datetime | None = None, wait: bool = False) -> list[int]:
+    started = []
+    for cid in due_cloud_syncs(now):
+        with _sync_lock:
+            if cid in _sync_running:
+                continue
+            _sync_running.add(cid)
+        future = _sync_pool.submit(_run_sync, cid)
+        if wait:
+            future.result()
+        started.append(cid)
+    return started
+
+
 def _loop() -> None:
     # Recalcula horários ao iniciar (o serviço pode ter ficado parado).
     for p in db.query("SELECT id, next_run_at FROM policies WHERE enabled = 1"):
@@ -109,6 +151,10 @@ def _loop() -> None:
             tick()
         except Exception:
             log.exception("Erro no agendador")
+        try:
+            cloud_sync_tick()
+        except Exception:
+            log.exception("Erro na sincronização automática de nuvem")
 
 
 def start() -> None:
