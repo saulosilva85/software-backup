@@ -22,6 +22,10 @@
 # =============================================================================
 set -eu
 
+# Garante as pastas de comandos administrativos (useradd, adduser...) no PATH:
+# com "su" (sem o "-"), o Debian/Ubuntu mantém o PATH do usuário comum, sem /usr/sbin.
+PATH="${PATH:-/usr/bin:/bin}:/usr/local/sbin:/usr/sbin:/sbin"; export PATH
+
 REPO="${BACKUPHUB_REPO:-saulosilva85/software-backup}"
 BRANCH="${BACKUPHUB_BRANCH:-main}"
 PREFIX="${BACKUPHUB_PREFIX:-/opt/backuphub}"
