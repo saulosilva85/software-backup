@@ -166,25 +166,24 @@ def local_ips() -> set[str]:
 
 
 def os_hint_from_banner(banner: str | None) -> str | None:
-    """Sistema estimado pela identificação do SSH (ex.: 'SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3')."""
-    if not banner:
-        return None
-    import re
-    b = banner.lower()
-    m = re.search(r"\+deb(\d+)", b)
-    if "debian" in b:
-        return f"Debian {m.group(1)}" if m else "Debian"
-    if "ubuntu" in b:
-        return "Ubuntu"
-    if "raspbian" in b:
-        return "Raspbian"
-    if "freebsd" in b:
-        return "FreeBSD"
-    if "windows" in b:
-        return "Windows (OpenSSH)"
-    if "openssh" in b:
-        return "Linux/Unix"
-    return None
+    """Sistema estimado pela identificação do SSH (ver osdetect.linux_from_banner)."""
+    from .osdetect import linux_from_banner
+    return linux_from_banner(banner)
+
+
+def identify(address: str, platform: str, open_ports: list[int] | None = None, timeout: float = 2.0) -> dict:
+    """Sistema (versão) e hostname sem credencial: NTLM no Windows, identificação SSH no Linux."""
+    from .osdetect import windows_info
+    result: dict = {}
+    if platform == "windows" or (open_ports and (445 in open_ports or 5985 in open_ports)):
+        info = windows_info(address, open_ports, timeout)
+        if info:
+            result["os"] = info.get("os")
+            result["hostname"] = info.get("netbios_name") or (info.get("dns_name") or "").split(".")[0] or None
+            result["domain"] = info.get("dns_domain") or None
+    if not result.get("os") and (platform == "linux" or (open_ports and 22 in open_ports)):
+        result["os"] = os_hint_from_banner(_ssh_banner(address, timeout))
+    return {k: v for k, v in result.items() if v}
 
 
 def scan_host(ip: str, timeout: float = 0.6) -> dict | None:
@@ -200,13 +199,18 @@ def scan_host(ip: str, timeout: float = 0.6) -> dict | None:
     if dns_name and (dns_name.replace(".", "").replace("-", "").isdigit() or dns_name.startswith("localhost")):
         dns_name = None  # PTR genérico (ex.: 192-168-0-10.provedor)
     own = socket.gethostname().split(".")[0] if ip in local_ips() else None  # o próprio servidor do BackupHub
-    mc_name = None if (nb_name or own) else multicast_name(ip, timeout + 0.4)
+    win = {}
+    if 445 in open_ports or 5985 in open_ports:
+        from .osdetect import windows_info
+        win = windows_info(ip, open_ports, timeout * 3) or {}
+    win_name = win.get("netbios_name") or ((win.get("dns_name") or "").split(".")[0] or None)
+    mc_name = None if (nb_name or own or win_name) else multicast_name(ip, timeout + 0.4)
     return {
         "ip": ip,
-        "hostname": nb_name or own or mc_name or (dns_name.split(".")[0] if dns_name else None),
+        "hostname": nb_name or win_name or own or mc_name or (dns_name.split(".")[0] if dns_name else None),
         "dns_name": dns_name,
         "workgroup": workgroup,
-        "os_hint": os_hint_from_banner(banner),
+        "os_hint": win.get("os") or os_hint_from_banner(banner),
         "open_ports": open_ports,
         "services": [PORTS[p] for p in open_ports],
         "ssh_banner": banner,

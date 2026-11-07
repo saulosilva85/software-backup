@@ -23,7 +23,7 @@ def test_parse_netbios():
 
 def test_os_hint():
     assert network.os_hint_from_banner("SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3") == "Debian 12"
-    assert network.os_hint_from_banner("SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.10") == "Ubuntu"
+    assert network.os_hint_from_banner("SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.10") == "Ubuntu 22.04"
     assert network.os_hint_from_banner("SSH-2.0-OpenSSH_for_Windows_8.1") == "Windows (OpenSSH)"
     assert network.os_hint_from_banner(None) is None
 
@@ -208,3 +208,13 @@ def test_check_now_endpoint(client, monkeypatch):
                                "created_at": db.utcnow()})
     r = client.post("/api/machines/health", json={}, headers=HEADERS).json
     assert r == {"checked": 2, "online": 1, "offline": 1}
+
+
+def test_basic_identity_updates_version_and_name(app, monkeypatch):
+    from backuphub.inventory import collect_machine
+    monkeypatch.setattr(network, "identify", lambda addr, platform, *a, **k: {"os": "Windows 11 23H2",
+                                                                              "hostname": "SAULOSILVA"})
+    mid = db.insert("machines", {"name": "192.168.18.13", "address": "192.168.18.13", "platform": "windows",
+                                 "provider": "onprem", "os": "Windows (estimado)", "created_at": db.utcnow()})
+    m = collect_machine(mid)        # sem credencial cadastrada: inventário básico pela rede
+    assert m["os"] == "Windows 11 23H2 (estimado)" and m["name"] == "SAULOSILVA" and m["inventory_status"] == "discovered"

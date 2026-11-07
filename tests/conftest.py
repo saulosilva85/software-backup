@@ -85,3 +85,10 @@ def fake_ssh(monkeypatch):
     from backuphub.backup import linux
     monkeypatch.setattr(linux, "SSHClient", FakeSSH)
     return FakeSSH
+
+
+@pytest.fixture(autouse=True)
+def _no_real_identify(monkeypatch):
+    """Evita consultas de rede reais (NTLM/SSH) a IPs fictícios durante os testes."""
+    from backuphub.inventory import network
+    monkeypatch.setattr(network, "identify", lambda *a, **k: {})

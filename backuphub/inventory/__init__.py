@@ -43,6 +43,25 @@ class NoCredentials(Exception):
     """Não há credencial cadastrada para a plataforma: não é uma falha, apenas falta configuração."""
 
 
+def basic_identity(machine: dict) -> dict:
+    """Atualiza sistema (versão estimada) e hostname consultando a máquina pela rede, sem credencial."""
+    if not machine.get("address") or machine["provider"] != "onprem":
+        return {}
+    from .network import identify
+    try:
+        found = identify(machine["address"], machine["platform"])
+    except Exception:
+        return {}
+    values = {}
+    if found.get("os"):
+        values["os"] = f"{found['os']} (estimado)"
+    if found.get("hostname"):
+        values["hostname"] = found["hostname"]
+        if machine["name"] in (machine.get("address"), machine.get("hostname"), None, ""):
+            values["name"] = found["hostname"]
+    return values
+
+
 def candidate_credentials(machine: dict) -> list[dict]:
     """Credenciais cadastradas compatíveis com a plataforma da máquina (SSH para Linux, WinRM para Windows)."""
     ctype = "winrm" if machine["platform"] == "windows" else "ssh"
@@ -73,9 +92,9 @@ def collect_machine(machine_id: int) -> dict:
             data = _collect_os(machine, secret)
         _save_collected(machine, data)
     except NoCredentials:
-        # Sem credencial: fica o inventário básico, obtido pela rede (nome, IP, sistema estimado, online/offline)
+        # Sem credencial: inventário básico, obtido pela rede (nome, IP, versão estimada do sistema, online/offline)
         db.update("machines", machine_id, {"inventory_status": "discovered", "inventory_message": None,
-                                           "last_inventory_at": machine.get("last_inventory_at") or db.utcnow()})
+                                           "last_inventory_at": db.utcnow(), **basic_identity(machine)})
         return db.get("machines", machine_id)
     except Exception as exc:
         db.update("machines", machine_id, {

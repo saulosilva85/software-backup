@@ -29,6 +29,9 @@ def check_machine(machine: dict) -> str:
             # Máquina respondeu na rede: inventário básico (sem credencial) disponível
             values["inventory_status"] = "discovered"
             values["last_inventory_at"] = machine.get("last_inventory_at") or db.utcnow()
+        if machine.get("inventory_status") != "ok" and (machine.get("os") or "").split(" (")[0] in ("", "Windows", "Linux"):
+            from .inventory import basic_identity
+            values.update(basic_identity(machine))  # versão do sistema ainda genérica: tenta identificar
     db.update("machines", machine["id"], values)
     if machine.get("state") == "online" and new_state == "offline":
         _alert_offline(machine)
