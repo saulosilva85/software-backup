@@ -420,6 +420,14 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
         return jsonify({"local": local, "inventory": network.inventory_networks(
             addresses, [n["network"] for n in local]), "max_hosts": network.MAX_HOSTS})
 
+    @app.post("/api/machines/health")
+    @role_required("operator")
+    def check_health_now():
+        ids = [int(i) for i in (body().get("ids") or [])] or None
+        states = health_monitor.check_all(ids)
+        return jsonify({"checked": len(states), "online": sum(1 for v in states.values() if v == "online"),
+                        "offline": sum(1 for v in states.values() if v == "offline")})
+
     @app.post("/api/discovery/scan")
     @role_required("operator")
     def discovery_scan():

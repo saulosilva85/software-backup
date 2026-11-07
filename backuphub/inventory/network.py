@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 from concurrent.futures import ThreadPoolExecutor
 
@@ -341,10 +342,45 @@ def inventory_networks(addresses: list[str], exclude: list[str]) -> list[dict]:
 # ----------------------------------------------------------------------------
 # Disponibilidade (online/offline)
 # ----------------------------------------------------------------------------
-PROBE_PORTS = {"linux": (22,), "windows": (5985, 5986, 445, 3389)}
+PROBE_PORTS = {"linux": (22,), "windows": (5985, 5986, 445, 3389, 135)}
+
+
+def _alive_tcp(ip: str, port: int, timeout: float) -> bool:
+    """Máquina respondeu? Conexão aceita OU recusada (RST) indicam que ela está ligada."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except ConnectionRefusedError:
+        return True
+    except OSError:
+        return False
+
+
+def _ping(ip: str, timeout: float) -> bool:
+    import shutil
+    import subprocess
+    exe = shutil.which("ping") or next((p for p in ("/usr/bin/ping", "/bin/ping") if os.path.exists(p)), None)
+    if not exe:
+        return False
+    try:
+        r = subprocess.run([exe, "-c", "1", "-W", str(max(1, int(timeout))), ip],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout + 2)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def is_reachable(address: str, platform: str, timeout: float = 2.0) -> bool:
-    """Responde em alguma porta de gerenciamento? (sem credencial, apenas conexão TCP)."""
+    """A máquina está ligada na rede? Sem credencial: TCP nas portas de gerenciamento e, se preciso, ping."""
+    if address in local_ips():
+        return True  # o próprio servidor do BackupHub
+    try:
+        ip = socket.gethostbyname(address)
+    except OSError:
+        return False
     ports = PROBE_PORTS.get(platform, (22, 5985, 445, 3389))
-    return any(_probe(address, p, timeout) for p in ports)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(ports)) as pool:
+        if any(pool.map(lambda p: _alive_tcp(ip, p, timeout), ports)):
+            return True
+    return _ping(ip, timeout)

@@ -179,3 +179,32 @@ def test_scan_uses_own_hostname(monkeypatch):
     monkeypatch.setattr(socket, "gethostname", lambda: "backup")
     h = network.scan_host("192.168.18.180")
     assert h["hostname"] == "backup" and h["os_hint"] == "Debian 12" and h["platform"] == "linux"
+
+
+def test_refused_connection_means_online(monkeypatch):
+    import socket as s
+    def refuse(addr, timeout=None):
+        raise ConnectionRefusedError()
+    monkeypatch.setattr(s, "create_connection", refuse)
+    monkeypatch.setattr(network, "local_ips", lambda: set())
+    monkeypatch.setattr(network, "_ping", lambda ip, t: False)
+    assert network.is_reachable("10.9.9.9", "linux", timeout=0.1) is True
+
+
+def test_ping_fallback_and_own_server(monkeypatch):
+    import socket as s
+    monkeypatch.setattr(s, "create_connection", lambda addr, timeout=None: (_ for _ in ()).throw(TimeoutError()))
+    monkeypatch.setattr(network, "local_ips", lambda: {"192.168.18.180"})
+    monkeypatch.setattr(network, "_ping", lambda ip, t: ip == "192.168.18.13")
+    assert network.is_reachable("192.168.18.13", "windows", timeout=0.1) is True    # firewall bloqueia TCP, ping responde
+    assert network.is_reachable("192.168.18.99", "windows", timeout=0.1) is False   # desligada
+    assert network.is_reachable("192.168.18.180", "linux") is True                  # o próprio servidor
+
+
+def test_check_now_endpoint(client, monkeypatch):
+    monkeypatch.setattr(network, "is_reachable", lambda a, p, timeout=2.0: a == "10.0.0.1")
+    for i, a in enumerate(("10.0.0.1", "10.0.0.2")):
+        db.insert("machines", {"name": f"m{i}", "address": a, "platform": "linux", "provider": "onprem",
+                               "created_at": db.utcnow()})
+    r = client.post("/api/machines/health", json={}, headers=HEADERS).json
+    assert r == {"checked": 2, "online": 1, "offline": 1}

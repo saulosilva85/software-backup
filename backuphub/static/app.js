@@ -379,8 +379,9 @@ async function pageInventory(el) {
   let machines = [];
 
   el.innerHTML = `
-    <div class="page-head"><div><h1>Inventário</h1><p>Servidores on-premise e máquinas virtuais na AWS e GCP · nuvem sincronizada automaticamente ${syncLabel()}</p></div>
+    <div class="page-head"><div><h1>Inventário</h1><p>Servidores on-premise e máquinas virtuais na AWS e GCP · estado verificado ${state.settings?.health_minutes > 0 ? `a cada ${state.settings.health_minutes} min` : "manualmente"} · nuvem sincronizada ${syncLabel()}</p></div>
       <div class="actions">${can("operator") ? `
+        <button class="btn" id="btn-health" title="Testa agora se os servidores on-premise estão ligados na rede">${icon("activity")}Verificar estado</button>
         <button class="btn" id="btn-discover">${icon("radar")}Descobrir na rede</button>
         <button class="btn" id="btn-cloud">${icon("cloud")}Sincronizar nuvem</button>
         <button class="btn btn-primary" id="btn-add">${icon("plus")}Adicionar servidor</button>` : ""}</div></div>
@@ -470,6 +471,13 @@ async function pageInventory(el) {
   if (can("operator")) {
     $("#btn-add", el).onclick = () => machineModal(null, load);
     $("#btn-discover", el).onclick = () => discoverModal(load);
+    $("#btn-health", el).onclick = (e) => withBusy(e.currentTarget, async () => {
+      try {
+        const r = await api("/api/machines/health", { method: "POST", body: {} });
+        toast(r.checked ? `${r.online} online, ${r.offline} offline` : "Nenhum servidor on-premise para verificar", r.offline ? "err" : "ok");
+      } catch (err) { toast(err.message, "err"); }
+      load();
+    });
     $("#btn-cloud", el).onclick = () => cloudSyncModal(load);
   }
   await load();
