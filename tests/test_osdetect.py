@@ -27,8 +27,12 @@ def test_windows_build_names():
     assert osdetect.windows_name(10, 0, 22631) == "Windows 11 23H2"
     assert osdetect.windows_name(10, 0, 19045) == "Windows 10 22H2"
     assert osdetect.windows_name(10, 0, 20348) == "Windows Server 2022"
-    assert osdetect.windows_name(10, 0, 17763) == "Windows 10 1809 / Windows Server 2019"
-    assert osdetect.windows_name(6, 3, 9600) == "Windows 8.1 / Windows Server 2012 R2"
+    assert osdetect.windows_name(10, 0, 17763) == "Windows 10 1809"
+    assert osdetect.windows_name(10, 0, 17763, server=True) == "Windows Server 2019"
+    assert osdetect.windows_name(10, 0, 26100) == "Windows 11 24H2"
+    assert osdetect.windows_name(10, 0, 26100, server=True) == "Windows Server 2025"
+    assert osdetect.windows_name(6, 3, 9600, server=True) == "Windows Server 2012 R2"
+    assert osdetect.is_ambiguous(10, 0, 26100) and not osdetect.is_ambiguous(10, 0, 20348)
     assert osdetect.windows_name(10, 0, 27000) == "Windows 11 build 27000"
 
 
@@ -89,3 +93,26 @@ def test_linux_from_banner():
     assert f("SSH-2.0-OpenSSH_7.4") == "Red Hat / CentOS / Oracle Linux 7 ou Amazon Linux 2"
     assert f("SSH-2.0-OpenSSH_for_Windows_9.5") == "Windows (OpenSSH)"
     assert f(None) is None
+
+
+def test_ambiguous_build_desktop_vs_server(monkeypatch):
+    """Build 26100: Windows 11 24H2 numa estação, Windows Server 2025 quando há indícios de servidor."""
+    monkeypatch.setattr(osdetect, "smb_ntlm_info", lambda ip, t=2.0, port=445: osdetect.parse_ntlm_challenge(
+        challenge(10, 0, 26100)))
+    open_by_host = {"10.0.0.11": set(), "10.0.0.12": {389, 88}, "10.0.0.13": {1433}, "10.0.0.14": {3389, 5985},
+                    "10.0.0.15": {3389}}
+
+    def fake_conn(addr, timeout=None):
+        if addr[1] in open_by_host[addr[0]]:
+            class C:
+                def __enter__(self): return self
+                def __exit__(self, *a): pass
+            return C()
+        raise OSError("closed")
+    monkeypatch.setattr(socket, "create_connection", fake_conn)
+    os_of = lambda ip: osdetect.windows_info(ip, [445])["os"]
+    assert os_of("10.0.0.11") == "Windows 11 24H2"          # estação: só compartilhamento de arquivos
+    assert os_of("10.0.0.12") == "Windows Server 2025"      # controlador de domínio
+    assert os_of("10.0.0.13") == "Windows Server 2025"      # SQL Server
+    assert os_of("10.0.0.14") == "Windows Server 2025"      # RDP + WinRM
+    assert os_of("10.0.0.15") == "Windows 11 24H2"          # só RDP: comum em estações

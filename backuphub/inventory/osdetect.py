@@ -20,30 +20,67 @@ import socket
 import struct
 
 # --------------------------------------------------------------------------- Windows
-# Builds do Windows NT 10.0. Quando o mesmo build é usado por versão cliente e servidor,
-# as duas são indicadas (a NTLM não informa se é edição Server).
+# Builds do Windows NT 10.0. Alguns builds são compartilhados por versão de estação e de servidor
+# (a NTLM não informa a edição): nesses casos, (estação, servidor) e o desempate é feito por
+# indícios de servidor (ver looks_like_server).
 WINDOWS_BUILDS = {
     10240: "Windows 10 1507", 10586: "Windows 10 1511",
-    14393: "Windows 10 1607 / Windows Server 2016", 15063: "Windows 10 1703", 16299: "Windows 10 1709",
-    17134: "Windows 10 1803", 17763: "Windows 10 1809 / Windows Server 2019", 18362: "Windows 10 1903",
+    14393: ("Windows 10 1607", "Windows Server 2016"), 15063: "Windows 10 1703", 16299: "Windows 10 1709",
+    17134: "Windows 10 1803", 17763: ("Windows 10 1809", "Windows Server 2019"), 18362: "Windows 10 1903",
     18363: "Windows 10 1909", 19041: "Windows 10 2004", 19042: "Windows 10 20H2", 19043: "Windows 10 21H1",
     19044: "Windows 10 21H2", 19045: "Windows 10 22H2", 20348: "Windows Server 2022",
     22000: "Windows 11 21H2", 22621: "Windows 11 22H2", 22631: "Windows 11 23H2",
-    25398: "Windows Server 23H2", 26100: "Windows 11 24H2 / Windows Server 2025", 26200: "Windows 11 25H2",
+    25398: "Windows Server 23H2", 26100: ("Windows 11 24H2", "Windows Server 2025"), 26200: "Windows 11 25H2",
 }
 LEGACY_WINDOWS = {
-    (6, 0): "Windows Vista / Windows Server 2008", (6, 1): "Windows 7 / Windows Server 2008 R2",
-    (6, 2): "Windows 8 / Windows Server 2012", (6, 3): "Windows 8.1 / Windows Server 2012 R2",
+    (6, 0): ("Windows Vista", "Windows Server 2008"), (6, 1): ("Windows 7", "Windows Server 2008 R2"),
+    (6, 2): ("Windows 8", "Windows Server 2012"), (6, 3): ("Windows 8.1", "Windows Server 2012 R2"),
     (5, 1): "Windows XP", (5, 2): "Windows Server 2003",
 }
 
 
-def windows_name(major: int, minor: int, build: int) -> str:
+def windows_name(major: int, minor: int, build: int, server: bool = False) -> str:
     if (major, minor) == (10, 0):
-        if build in WINDOWS_BUILDS:
-            return WINDOWS_BUILDS[build]
-        return f"Windows {'11' if build >= 22000 else '10'} build {build}"
-    return LEGACY_WINDOWS.get((major, minor), f"Windows {major}.{minor} build {build}")
+        name = WINDOWS_BUILDS.get(build) or f"Windows {'11' if build >= 22000 else '10'} build {build}"
+    else:
+        name = LEGACY_WINDOWS.get((major, minor), f"Windows {major}.{minor} build {build}")
+    if isinstance(name, tuple):
+        return name[1] if server else name[0]
+    return name
+
+
+def is_ambiguous(major: int, minor: int, build: int) -> bool:
+    if (major, minor) == (10, 0):
+        return isinstance(WINDOWS_BUILDS.get(build), tuple)
+    return isinstance(LEGACY_WINDOWS.get((major, minor)), tuple)
+
+
+DC_PORTS = (88, 389, 3268)                 # Kerberos, LDAP, Catálogo Global: controlador de domínio
+SERVER_PORTS = (53, 1433, 80, 443)         # DNS, SQL Server, IIS
+
+
+def looks_like_server(ip: str, open_ports: list[int] | None = None, timeout: float = 0.8) -> bool:
+    """Indícios de Windows Server sem credencial.
+
+    Estações (Windows 10/11) não expõem por padrão serviços de controlador de domínio, DNS,
+    SQL Server ou IIS, e não vêm com RDP e WinRM habilitados juntos.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def alive(port: int) -> bool:
+        try:
+            with socket.create_connection((ip, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
+
+    known = set(open_ports or [])
+    to_probe = [p for p in DC_PORTS + SERVER_PORTS + (3389, 5985) if p not in known]
+    with ThreadPoolExecutor(max_workers=len(to_probe) or 1) as pool:
+        found = known | {p for p, ok in zip(to_probe, pool.map(alive, to_probe)) if ok}
+    if found & set(DC_PORTS) or found & set(SERVER_PORTS):
+        return True
+    return 3389 in found and 5985 in found
 
 
 NTLM_FLAGS = 0xE2888207  # UNICODE|OEM|REQUEST_TARGET|NTLM|ALWAYS_SIGN|EXTENDED_SESSION|TARGET_INFO|VERSION|128|KEY_EXCH|56
@@ -84,7 +121,8 @@ def parse_ntlm_challenge(data: bytes) -> dict | None:
         if flags & 0x02000000 and len(msg) >= 56:  # NEGOTIATE_VERSION
             major, minor, build = msg[48], msg[49], struct.unpack_from("<H", msg, 50)[0]
             if major:
-                info.update(major=major, minor=minor, build=build, os=windows_name(major, minor, build))
+                info.update(major=major, minor=minor, build=build, os=windows_name(major, minor, build),
+                            ambiguous=is_ambiguous(major, minor, build))
         ti_len, _, ti_off = struct.unpack_from("<HHI", msg, 40)
         ti = msg[ti_off:ti_off + ti_len]
         pos = 0
@@ -173,13 +211,16 @@ def winrm_ntlm_info(ip: str, port: int = 5985, timeout: float = 2.0) -> dict | N
 
 def windows_info(ip: str, open_ports: list[int] | None = None, timeout: float = 2.0) -> dict | None:
     ports = open_ports or [445, 5985]
+    info = None
     if 445 in ports:
         info = smb_ntlm_info(ip, timeout)
-        if info and info.get("os"):
-            return info
-    if 5985 in ports:
-        return winrm_ntlm_info(ip, 5985, timeout)
-    return None
+    if not (info and info.get("os")) and 5985 in ports:
+        info = winrm_ntlm_info(ip, 5985, timeout)
+    if info and info.get("ambiguous"):
+        server = looks_like_server(ip, open_ports)
+        info["os"] = windows_name(info["major"], info["minor"], info["build"], server=server)
+        info["server_guess"] = server
+    return info
 
 
 # --------------------------------------------------------------------------- Linux (SSH)
