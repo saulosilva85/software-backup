@@ -316,7 +316,7 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
         return jsonify({"ok": True, "message": msg})
 
     # ------------------------------------------------------------- Inventário
-    MACHINE_FIELDS = ("name", "address", "platform", "credential_id", "tags", "os")
+    MACHINE_FIELDS = ("name", "hostname", "address", "platform", "credential_id", "tags", "os")
 
     def machine_out(m: dict, last_jobs: dict) -> dict:
         m["last_backup"] = last_jobs.get(m["id"])
@@ -337,8 +337,8 @@ def create_app(config: type[Config] = Config, start_background: bool = True) -> 
                 sql += f" AND {f} = ?"
                 params.append(request.args[f])
         if request.args.get("q"):
-            sql += " AND (name LIKE ? OR address LIKE ? OR instance_id LIKE ? OR os LIKE ?)"
-            params += [f"%{request.args['q']}%"] * 4
+            sql += " AND (name LIKE ? OR hostname LIKE ? OR address LIKE ? OR instance_id LIKE ? OR os LIKE ?)"
+            params += [f"%{request.args['q']}%"] * 5
         if request.args.get("include_terminated") != "1":
             sql += " AND COALESCE(state,'') != 'terminated'"
         last = last_backup_map()

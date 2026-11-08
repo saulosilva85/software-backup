@@ -183,7 +183,22 @@ def identify(address: str, platform: str, open_ports: list[int] | None = None, t
             result["domain"] = info.get("dns_domain") or None
     if not result.get("os") and (platform == "linux" or (open_ports and 22 in open_ports)):
         result["os"] = os_hint_from_banner(_ssh_banner(address, timeout))
+    if not result.get("hostname"):
+        result["hostname"] = resolve_hostname(address)
     return {k: v for k, v in result.items() if v}
+
+
+def resolve_hostname(address: str, timeout: float = 0.8) -> str | None:
+    """Nome sem credencial: o próprio servidor, DNS reverso (PTR) ou mDNS/LLMNR."""
+    if address in local_ips():
+        return socket.gethostname().split(".")[0]
+    try:
+        name = socket.gethostbyaddr(address)[0]
+        if name and not name.replace(".", "").replace("-", "").isdigit() and not name.startswith("localhost"):
+            return name.split(".")[0]
+    except OSError:
+        pass
+    return multicast_name(address, timeout)
 
 
 def scan_host(ip: str, timeout: float = 0.6) -> dict | None:

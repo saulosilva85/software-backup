@@ -386,7 +386,7 @@ async function pageInventory(el) {
         <button class="btn" id="btn-cloud">${icon("cloud")}Sincronizar nuvem</button>
         <button class="btn btn-primary" id="btn-add">${icon("plus")}Adicionar servidor</button>` : ""}</div></div>
     <div class="actions" style="margin-bottom:14px">
-      <div class="search">${icon("search")}<input id="f-q" placeholder="Buscar por nome, IP, SO..."></div>
+      <div class="search">${icon("search")}<input id="f-q" placeholder="Buscar por hostname, IP, sistema..."></div>
       <div class="segmented" id="f-provider">
         <button data-v="" class="on">Todos</button><button data-v="onprem">On-premise</button><button data-v="aws">AWS</button><button data-v="gcp">GCP</button></div>
       <div class="segmented" id="f-platform"><button data-v="" class="on">Todas</button><button data-v="linux">Linux</button><button data-v="windows">Windows</button></div>
@@ -426,17 +426,20 @@ async function pageInventory(el) {
     const allOn = machines.every((m) => selected.has(m.id));
     box.innerHTML = `<table><thead><tr>
         <th style="width:36px"><input type="checkbox" id="sel-all" ${allOn ? "checked" : ""}></th>
-        <th>Máquina</th><th>Origem</th><th>Sistema</th><th>Estado</th><th>Inventário</th><th>Último backup</th></tr></thead>
+        <th>Hostname</th><th>IP</th><th>Origem</th><th>Sistema</th><th>Estado</th><th>Inventário</th><th>Último backup</th></tr></thead>
       <tbody>${machines.map((m) => {
         const dt = diskTotals(m.disks);
         const lb = m.last_backup;
         return `<tr class="clickable ${selected.has(m.id) ? "selected" : ""}" data-id="${m.id}">
           <td><input type="checkbox" class="sel" data-id="${m.id}" ${selected.has(m.id) ? "checked" : ""}></td>
-          <td><div class="title">${esc(m.name)}</div><div class="sub mono">${esc(m.address || m.ip_private || "—")}${m.hostname && m.hostname !== m.name ? ` · ${esc(m.hostname)}` : ""}</div></td>
+          <td>${(() => { const hn = m.hostname || (m.name && m.name !== m.address ? m.name : "");
+            return hn ? `<div class="title">${esc(hn)}</div>${m.provider !== "onprem" && m.name && m.name !== hn ? `<div class="sub">${esc(m.name)}</div>` : ""}`
+              : `<span class="muted" title="O servidor não divulga o nome pela rede. Ele aparece ao cadastrar uma credencial, ou pode ser informado em Editar.">Não identificado</span>`; })()}</td>
+          <td class="mono nowrap">${esc(m.address || m.ip_private || "—")}</td>
           <td>${provBadge(m.provider)}${m.region ? `<div class="sub">${esc(m.region)}</div>` : ""}</td>
-          <td><div>${platformLabel(m.platform)}</div><div class="sub ellipsis" style="max-width:220px">${esc(m.os || "")}</div></td>
+          <td><div>${platformLabel(m.platform)}</div><div class="sub ellipsis" style="max-width:200px" title="${esc(m.os || "")}">${esc(m.os || "")}</div></td>
           <td>${machineBadge(m.state || "unknown")}${m.state === "terminated" && m.terminated_at ? `<div class="sub">${fmtDateTime(m.terminated_at)}</div>`
-            : ["offline", "unreachable"].includes(m.state) ? `<div class="sub">${m.last_seen_at ? `visto ${fmtRelative(m.last_seen_at)}` : "nunca respondeu"}</div>` : ""}</td>
+            : ["offline", "unreachable"].includes(m.state) ? `<div class="sub nowrap">${m.last_seen_at ? `visto ${fmtRelative(m.last_seen_at)}` : "sem resposta"}</div>` : ""}</td>
           <td title="${m.inventory_status === "discovered" ? "Informações obtidas pela rede (nome, IP, sistema estimado). Com uma credencial cadastrada o inventário fica completo." : m.inventory_status === "ok" ? "Informações lidas do próprio sistema, via credencial." : ""}">${m.inventory_status === "running" ? '<span class="badge b-running">Coletando</span>' : m.inventory_status === "ok" ? '<span class="badge b-success">Completo</span>' : badge(m.inventory_status || "pending")}
             ${m.inventory_status === "error" ? `<div class="sub ellipsis" style="max-width:200px" title="${esc(m.inventory_message)}">${esc(m.inventory_message)}</div>` : `<div class="sub">${fmtRelative(m.last_inventory_at)}</div>`}</td>
           <td>${lb ? `${badge(lb.status)}<div class="sub">${fmtRelative(lb.finished_at)}</div>` : '<span class="muted">Nunca</span>'}</td></tr>`;
@@ -496,14 +499,16 @@ async function machineModal(machine, onDone) {
     title: machine ? "Editar servidor" : "Adicionar servidor on-premise",
     subtitle: "O BackupHub conecta via SSH (Linux) ou WinRM (Windows) — nenhum agente é instalado.",
     body: `
-      <div class="row"><div class="field"><label>Nome</label><input name="name" value="${esc(m.name)}" placeholder="srv-arquivos-01"></div>
-        <div class="field"><label>Endereço IP ou hostname</label><input name="address" value="${esc(m.address)}" placeholder="10.0.0.15"></div></div>
+      <div class="row"><div class="field"><label>Hostname</label><input name="hostname" value="${esc(m.hostname || (m.name !== m.address ? m.name || "" : ""))}" placeholder="srv-arquivos-01"><span class="hint">Opcional: é preenchido automaticamente quando identificado</span></div>
+        <div class="field"><label>Endereço IP</label><input name="address" value="${esc(m.address)}" placeholder="10.0.0.15"></div></div>
       <div class="row"><div class="field"><label>Sistema operacional</label><select name="platform">
           <option value="linux" ${m.platform === "linux" ? "selected" : ""}>Linux</option><option value="windows" ${m.platform === "windows" ? "selected" : ""}>Windows</option></select></div>
         <div class="field"><label>Credencial de acesso</label><select name="credential_id">${credOpts}</select></div></div>
       ${machine ? "" : '<label class="check"><input type="checkbox" name="collect" checked> Coletar inventário após salvar</label>'}`,
     actions: [{ label: "Cancelar" }, { label: "Salvar", primary: true, onClick: async (ctx) => {
       const data = readForm(ctx.el); data.credential_id = data.credential_id ? Number(data.credential_id) : null;
+      data.hostname = (data.hostname || "").trim() || null;
+      data.name = data.hostname || data.address;
       if (machine) await api(`/api/machines/${machine.id}`, { method: "PUT", body: data });
       else await api("/api/machines", { method: "POST", body: data });
       toast("Servidor salvo"); ctx.close(); onDone?.();

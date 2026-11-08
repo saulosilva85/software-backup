@@ -163,8 +163,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary)
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
-  font-weight: 600; padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--surface-2); white-space: nowrap; }
-td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  font-weight: 600; padding: 11px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); white-space: nowrap; }
+td { padding: 12px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 tr:last-child td { border-bottom: 0; }
 tbody tr { transition: background .1s; }
 tbody tr:hover { background: var(--surface-2); }

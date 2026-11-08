@@ -218,3 +218,26 @@ def test_basic_identity_updates_version_and_name(app, monkeypatch):
                                  "provider": "onprem", "os": "Windows (estimado)", "created_at": db.utcnow()})
     m = collect_machine(mid)        # sem credencial cadastrada: inventário básico pela rede
     assert m["os"] == "Windows 11 23H2 (estimado)" and m["name"] == "SAULOSILVA" and m["inventory_status"] == "discovered"
+
+
+def test_resolve_hostname_linux(monkeypatch):
+    import socket as s
+    monkeypatch.setattr(network, "local_ips", lambda: {"192.168.18.180"})
+    monkeypatch.setattr(s, "gethostname", lambda: "backup")
+    assert network.resolve_hostname("192.168.18.180") == "backup"                     # o próprio servidor
+    monkeypatch.setattr(s, "gethostbyaddr", lambda ip: ("srv-db01.empresa.local", [], [ip]))
+    assert network.resolve_hostname("10.0.0.5") == "srv-db01"                          # DNS reverso
+    monkeypatch.setattr(s, "gethostbyaddr", lambda ip: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(network, "multicast_name", lambda ip, t=0.8: "debian13")
+    assert network.resolve_hostname("192.168.18.189") == "debian13"                    # mDNS/LLMNR
+    monkeypatch.setattr(network, "multicast_name", lambda ip, t=0.8: None)
+    assert network.resolve_hostname("192.168.18.190") is None                          # não divulga o nome
+
+
+def test_edit_hostname_manually(client):
+    mid = client.post("/api/machines", json={"name": "192.168.18.189", "address": "192.168.18.189",
+                                             "platform": "linux", "collect": False}, headers=HEADERS).json["id"]
+    client.put(f"/api/machines/{mid}", json={"hostname": "srv-debian13", "name": "srv-debian13"}, headers=HEADERS)
+    m = db.get("machines", mid)
+    assert m["hostname"] == "srv-debian13" and m["name"] == "srv-debian13"
+    assert [x["id"] for x in client.get("/api/machines?q=debian13").json] == [mid]

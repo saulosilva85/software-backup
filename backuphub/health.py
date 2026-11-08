@@ -31,7 +31,8 @@ def check_machine(machine: dict) -> str:
             values["last_inventory_at"] = machine.get("last_inventory_at") or db.utcnow()
         current_os = machine.get("os") or ""
         if machine.get("inventory_status") != "ok" and (current_os.split(" (")[0] in ("", "Windows", "Linux")
-                                                         or " / Windows Server" in current_os):
+                                                         or " / Windows Server" in current_os
+                                                         or not machine.get("hostname")):
             from .inventory import basic_identity
             values.update(basic_identity(machine))  # versão do sistema ainda genérica: tenta identificar
     db.update("machines", machine["id"], values)
